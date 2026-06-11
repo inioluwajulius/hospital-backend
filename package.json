@@ -1,0 +1,29 @@
+{
+  "name": "hospital-backend",
+  "version": "1.0.0",
+  "description": "hospital management system",
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "dev": "nodemon server.js",
+    "lint": "eslint . --ext .js",
+    "test": "jest --runInBand",
+    "test:coverage": "jest --runInBand --coverage"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^9.3.2"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.1",
+    "jest": "^30.3.0",
+    "nodemon": "^3.1.14",
+    "supertest": "^7.2.2"
+  }
+}
