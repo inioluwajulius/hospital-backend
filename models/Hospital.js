@@ -141,9 +141,7 @@ const hospitalSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 // Index for faster tenant lookups
-hospitalSchema.index({ slug: 1 });
-hospitalSchema.index({ subdomain: 1 });
-hospitalSchema.index({ customDomain: 1 });
+// slug, subdomain, customDomain already indexed via unique:true in field definitions
 hospitalSchema.index({ superAdmin: 1 });
 
 module.exports = mongoose.model('Hospital', hospitalSchema);

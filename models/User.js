@@ -114,12 +114,10 @@ const userSchema = new mongoose.Schema({
     
 }, { timestamps: true });
 
-// Unique email per hospital (multi-tenancy isolation)
-// SuperAdmin emails are global unique
+// isSuperAdmin already indexed via index:true in field definition
+// invitationToken is sparse-indexed via field definition
 userSchema.index({ email: 1, hospitalId: 1 }, { unique: true, sparse: true });
-userSchema.index({ isSuperAdmin: 1 });
 userSchema.index({ hospitalId: 1, role: 1 });
-userSchema.index({ invitationToken: 1 });
 
 const stripSensitiveFields = (_, ret) => {
     delete ret.password;
