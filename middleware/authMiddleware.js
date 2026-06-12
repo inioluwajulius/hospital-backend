@@ -19,6 +19,7 @@ const authMiddleware = (req, res, next) => {
 		const decoded = jwt.verify(token, process.env.JWT_SECRET);
 		req.user = {
 			id: decoded.userId,
+			_id: decoded.userId, // Alias for compatibility with controllers using _id
 			role: decoded.role,
 			isSuperAdmin: decoded.isSuperAdmin,
 			hospitalId: decoded.hospitalId

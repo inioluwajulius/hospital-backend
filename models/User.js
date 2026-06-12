@@ -115,9 +115,9 @@ const userSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 // isSuperAdmin already indexed via index:true in field definition
-// invitationToken is sparse-indexed via field definition
 userSchema.index({ email: 1, hospitalId: 1 }, { unique: true, sparse: true });
 userSchema.index({ hospitalId: 1, role: 1 });
+userSchema.index({ invitationToken: 1 });
 
 const stripSensitiveFields = (_, ret) => {
     delete ret.password;

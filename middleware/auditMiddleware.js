@@ -67,7 +67,7 @@ function logAudit(req, res, responseData) {
     resourceType: getResourceType(req.originalUrl),
     
     // WHERE
-    ipAddress: req.ip || req.connection.remoteAddress,
+    ipAddress: req.ip || req.socket?.remoteAddress,
     userAgent: req.get('user-agent') || 'UNKNOWN',
     
     // WHEN
@@ -103,7 +103,9 @@ function logAudit(req, res, responseData) {
 function appendToAuditLog(entry) {
   try {
     const logLine = JSON.stringify(entry) + '\n';
-    fs.appendFileSync(AUDIT_LOG_FILE, logLine, 'utf8');
+    fs.appendFile(AUDIT_LOG_FILE, logLine, 'utf8', (err) => {
+      if (err) console.error('Failed to write audit log:', err.message);
+    });
   } catch (error) {
     console.error('Failed to write audit log:', error.message);
   }
@@ -119,7 +121,9 @@ function logSecurityEvent(entry) {
       ...entry,
       type: 'SECURITY_EVENT'
     }) + '\n';
-    fs.appendFileSync(securityLog, logLine, 'utf8');
+    fs.appendFile(securityLog, logLine, 'utf8', (err) => {
+      if (err) console.error('Failed to write security log:', err.message);
+    });
   }
 }
 

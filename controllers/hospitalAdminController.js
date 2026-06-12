@@ -28,7 +28,7 @@ exports.getHospitalProfile = async (req, res) => {
             data: hospital,
         });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: 'Failed to fetch hospital profile' });
     }
 };
 
@@ -69,7 +69,7 @@ exports.updateHospitalProfile = async (req, res) => {
             data: hospital,
         });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: 'Failed to update hospital profile' });
     }
 };
 
@@ -82,8 +82,8 @@ exports.getAllStaff = async (req, res) => {
             return res.status(400).json({ error: 'Hospital context required' });
         }
 
-        const page = req.query.page || 1;
-        const limit = req.query.limit || 10;
+        const page = parseInt(req.query.page, 10) || 1;
+        const limit = parseInt(req.query.limit, 10) || 10;
         const skip = (page - 1) * limit;
         const role = req.query.role;
 
@@ -114,7 +114,7 @@ exports.getAllStaff = async (req, res) => {
             },
         });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: 'Failed to fetch staff' });
     }
 };
 
@@ -144,11 +144,16 @@ exports.inviteStaffMember = async (req, res) => {
         const invitationToken = crypto.randomBytes(32).toString('hex');
         const invitationExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
+        // Generate a random temp password and hash it (never store plaintext)
+        const bcrypt = require('bcryptjs');
+        const tempPassword = crypto.randomBytes(16).toString('hex');
+        const hashedTempPassword = await bcrypt.hash(tempPassword, 10);
+
         // Create user with pending status
         const newUser = await User.create({
             name,
             email,
-            password: crypto.randomBytes(16).toString('hex'), // Random temp password
+            password: hashedTempPassword,
             role,
             hospitalId,
             status: 'pending',
@@ -175,7 +180,7 @@ exports.inviteStaffMember = async (req, res) => {
             },
         });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: 'Failed to invite staff member' });
     }
 };
 
@@ -218,7 +223,7 @@ exports.acceptInvitation = async (req, res) => {
             },
         });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: 'Failed to accept invitation' });
     }
 };
 
@@ -257,7 +262,7 @@ exports.resendInvitation = async (req, res) => {
             data: { userId: user._id },
         });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: 'Failed to resend invitation' });
     }
 };
 
@@ -279,7 +284,7 @@ exports.getHospitalAdmins = async (req, res) => {
             data: admins,
         });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: 'Failed to fetch hospital admins' });
     }
 };
 
@@ -326,7 +331,7 @@ exports.promoteToAdmin = async (req, res) => {
             data: hospitalAdmin,
         });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: 'Failed to promote user' });
     }
 };
 
@@ -353,7 +358,7 @@ exports.revokeAdminAccess = async (req, res) => {
             message: 'Admin privileges revoked',
         });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: 'Failed to revoke admin access' });
     }
 };
 

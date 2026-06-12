@@ -115,7 +115,7 @@ function getAtlasTroubleshootingHint(error) {
    2. If password contains special chars: encode them or change to alphanumeric
    3. Ensure user exists in correct database in Atlas
    4. Reset DB user password in Atlas and update MONGO_URI
-   5. In Atlas Network Access, verify IP whitelist includes: 105.113.98.86
+   5. In Atlas Network Access, verify your current IP is whitelisted (check https://whatismyip.com)
         `;
     }
     
@@ -127,7 +127,7 @@ function getAtlasTroubleshootingHint(error) {
    
    Fixes to try:
    1. Go to: https://cloud.mongodb.com -> Network Access
-   2. Add your current IP: 105.113.98.86
+   2. Add your current IP (check https://whatismyip.com)
    3. Or add 0.0.0.0/0 for development (NOT production)
    4. Wait 1-2 minutes for whitelist to take effect
    5. Verify cluster is running in Atlas UI
@@ -157,7 +157,7 @@ function getAtlasTroubleshootingHint(error) {
    Cause: Network latency, IP whitelist, or Atlas overload
    
    Fixes to try:
-   1. In Atlas Network Access, whitelist your IP: 105.113.98.86
+   1. In Atlas Network Access, whitelist your current IP (check https://whatismyip.com)
    2. Check your internet connectivity (ping 8.8.8.8)
    3. Try from a different network to isolate network issue
    4. Check Atlas cluster status (may be scaling/recovering)

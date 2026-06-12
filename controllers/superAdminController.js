@@ -17,8 +17,8 @@ exports.getAllHospitals = async (req, res) => {
             return res.status(403).json({ error: 'Unauthorized' });
         }
 
-        const page = req.query.page || 1;
-        const limit = req.query.limit || 10;
+        const page = parseInt(req.query.page, 10) || 1;
+        const limit = parseInt(req.query.limit, 10) || 10;
         const skip = (page - 1) * limit;
 
         const hospitals = await Hospital.find()
@@ -39,7 +39,8 @@ exports.getAllHospitals = async (req, res) => {
             },
         });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        console.error('getAllHospitals error:', error);
+        res.status(500).json({ error: 'Failed to fetch hospitals' });
     }
 };
 
@@ -167,7 +168,7 @@ exports.createHospital = async (req, res) => {
         });
     } catch (error) {
         console.error('Create hospital error:', error);
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: 'Failed to create hospital' });
     }
 };
 
@@ -207,7 +208,8 @@ exports.updateHospital = async (req, res) => {
             data: hospital,
         });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        console.error('updateHospital error:', error);
+        res.status(500).json({ error: 'Failed to update hospital' });
     }
 };
 
@@ -237,7 +239,8 @@ exports.updateHospitalStatus = async (req, res) => {
             data: hospital,
         });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        console.error('updateHospitalStatus error:', error);
+        res.status(500).json({ error: 'Failed to update hospital status' });
     }
 };
 
@@ -257,7 +260,8 @@ exports.getHospital = async (req, res) => {
             data: hospital,
         });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        console.error('getHospital error:', error);
+        res.status(500).json({ error: 'Failed to fetch hospital' });
     }
 };
 
@@ -281,7 +285,8 @@ exports.getHospitalStats = async (req, res) => {
             },
         });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        console.error('getHospitalStats error:', error);
+        res.status(500).json({ error: 'Failed to fetch hospital stats' });
     }
 };
 
@@ -307,7 +312,8 @@ exports.updateHospitalFeatures = async (req, res) => {
             data: hospital,
         });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        console.error('updateHospitalFeatures error:', error);
+        res.status(500).json({ error: 'Failed to update features' });
     }
 };
 
