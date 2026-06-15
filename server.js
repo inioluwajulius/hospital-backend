@@ -4,6 +4,8 @@ const connectDB = require('./config/db');
 const auditMiddleware = require('./middleware/auditMiddleware');
 const authMiddleware = require('./middleware/authMiddleware');
 const { tenantMiddleware, tenantDataFilter } = require('./middleware/tenantMiddleware');
+const http = require('http');
+const socket = require('./socket');
 require('dotenv').config();
 
 const app = express();
@@ -48,6 +50,7 @@ const patientRoutes = require('./routes/patientRoutes');
 const adminRoutesV1 = require('./routes/api/v1/adminRoutes');
 const superAdminRoutes = require('./routes/api/v1/superAdminRoutes');
 const hospitalAdminRoutes = require('./routes/api/v1/hospitalAdminRoutes');
+const notificationRoutes = require('./routes/api/v1/notificationRoutes');
 
 // Legacy Routes (for backward compatibility)
 const appointmentRoutes = require('./routes/appointmentRoutes');
@@ -72,6 +75,7 @@ app.use('/api/v1/users', userRoutes);
 // Multi-tenant SaaS routes
 app.use('/api/v1/super-admin', superAdminRoutes);
 app.use('/api/v1/hospital-admin', hospitalAdminRoutes);
+app.use('/api/v1/notifications', notificationRoutes);
 
 // Legacy routes - backward compatibility
 app.use('/api/appointments', appointmentRoutes);
@@ -103,7 +107,9 @@ const PORT = process.env.PORT || 5000;
 
 const startServer = async () => {
     await connectDB();
-    return app.listen(PORT, () => {
+    const server = http.createServer(app);
+    socket.init(server);
+    return server.listen(PORT, () => {
         console.log(`Server is running on port ${PORT}`);
         console.log(`Audit logging enabled - logs stored in ./logs/`);
     });

@@ -3,6 +3,8 @@ const Patient = require("../models/Patient");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
+const Notification = require("../models/Notification");
+const socketService = require("../socket");
 
 const PASSWORD_REQUIREMENTS_MESSAGE = 'Password must be at least 8 characters and include uppercase, lowercase, number, and special character';
 
@@ -143,6 +145,32 @@ exports.register = async (req, res) => {
             });
             await newUser.save();
 
+            // Notify hospital admins
+            if (effectiveHospitalId) {
+                try {
+                    const admins = await User.find({ role: 'hospital_admin', hospitalId: effectiveHospitalId });
+                    if (admins.length > 0) {
+                        const notifications = admins.map(admin => ({
+                            recipient: admin._id,
+                            hospitalId: effectiveHospitalId,
+                            type: 'REGISTRATION',
+                            message: `New staff member registered: ${name} (${role.toUpperCase()})`,
+                            link: role.toLowerCase() === 'doctor' ? '/admin/pending-approvals' : '/admin/doctors'
+                        }));
+                        const savedNotifications = await Notification.insertMany(notifications);
+                        
+                        const io = socketService.getIO();
+                        if (io) {
+                            savedNotifications.forEach(notif => {
+                                io.to(notif.recipient.toString()).emit('new_notification', notif);
+                            });
+                        }
+                    }
+                } catch (err) {
+                    console.error('Notification error:', err);
+                }
+            }
+
             // Tests expect a generic staff registration success message
             return res.status(201).json({ 
                 message: 'Staff registration successful',
@@ -214,6 +242,32 @@ exports.register = async (req, res) => {
                 bloodGroup: bloodGroup || ''
             });
             await patientRecord.save();
+
+            // Notify hospital admins
+            if (effectiveHospitalId) {
+                try {
+                    const admins = await User.find({ role: 'hospital_admin', hospitalId: effectiveHospitalId });
+                    if (admins.length > 0) {
+                        const notifications = admins.map(admin => ({
+                            recipient: admin._id,
+                            hospitalId: effectiveHospitalId,
+                            type: 'REGISTRATION',
+                            message: `New patient registered: ${name}`,
+                            link: '/admin/patients'
+                        }));
+                        const savedNotifications = await Notification.insertMany(notifications);
+                        
+                        const io = socketService.getIO();
+                        if (io) {
+                            savedNotifications.forEach(notif => {
+                                io.to(notif.recipient.toString()).emit('new_notification', notif);
+                            });
+                        }
+                    }
+                } catch (err) {
+                    console.error('Notification error:', err);
+                }
+            }
 
             return res.status(201).json({
                 message: 'Registration successful! Your profile is pending admin verification. You will be notified once approved.',

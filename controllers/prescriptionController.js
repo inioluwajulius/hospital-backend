@@ -1,4 +1,6 @@
 const Prescription = require('../models/Prescription');
+const Notification = require('../models/Notification');
+const socketService = require('../socket');
 
 /**
  * Create prescription
@@ -17,8 +19,28 @@ exports.createPrescription = async (req, res) => {
         });
 
         await prescription.save();
-        await prescription.populate('patientId', 'name patientCardNumber');
-        await prescription.populate('doctorId', 'name specialization');
+        await prescription.populate([
+            { path: 'patientId', select: 'name patientCardNumber userId' },
+            { path: 'doctorId', select: 'name specialization' }
+        ]);
+
+        // Notify Patient
+        try {
+            const io = socketService.getIO();
+            
+            if (prescription.patientId && prescription.patientId.userId) {
+                const notif = await Notification.create({
+                    recipient: prescription.patientId.userId,
+                    hospitalId: req.tenant?.id,
+                    type: 'PRESCRIPTION',
+                    message: `New prescription issued by Dr. ${prescription.doctorId?.name || 'your doctor'}`,
+                    link: '/patient/prescriptions'
+                });
+                if (io) io.to(prescription.patientId.userId.toString()).emit('new_notification', notif);
+            }
+        } catch (err) {
+            console.error('Notification error:', err);
+        }
 
         res.status(201).json(prescription);
     } catch (error) {

@@ -1,5 +1,7 @@
 const LabResult = require('../models/LabResult');
 const LabTest = require('../models/LabTest');
+const Notification = require('../models/Notification');
+const socketService = require('../socket');
 
 /**
  * Create lab test result
@@ -7,12 +9,13 @@ const LabTest = require('../models/LabTest');
  */
 exports.createLabResult = async (req, res) => {
     try {
-        const { patientId, testName, testCategory, results, notes, attachments } = req.body;
+        const { patientId, testName, testCategory, results, notes, attachments, doctorId } = req.body;
 
         const testOrder = `LAB-${Date.now()}`;
 
         const labResult = new LabResult({
             patientId,
+            doctorId,
             testOrder,
             testName,
             testCategory,
@@ -25,7 +28,39 @@ exports.createLabResult = async (req, res) => {
         });
 
         await labResult.save();
-        await labResult.populate('patientId', 'name patientCardNumber');
+        await labResult.populate([
+            { path: 'patientId', select: 'name patientCardNumber userId' },
+            { path: 'doctorId', select: 'userId' }
+        ]);
+
+        // Notifications
+        try {
+            const io = socketService.getIO();
+            
+            if (labResult.patientId && labResult.patientId.userId) {
+                const notif = await Notification.create({
+                    recipient: labResult.patientId.userId,
+                    hospitalId: req.tenant?.id,
+                    type: 'LAB_RESULT',
+                    message: `New lab result available: ${testName}`,
+                    link: '/patient/medical-records'
+                });
+                if (io) io.to(labResult.patientId.userId.toString()).emit('new_notification', notif);
+            }
+
+            if (labResult.doctorId && labResult.doctorId.userId) {
+                const docNotif = await Notification.create({
+                    recipient: labResult.doctorId.userId,
+                    hospitalId: req.tenant?.id,
+                    type: 'LAB_RESULT',
+                    message: `Lab result completed for patient: ${labResult.patientId.name}`,
+                    link: '/doctor/lab-tests'
+                });
+                if (io) io.to(labResult.doctorId.userId.toString()).emit('new_notification', docNotif);
+            }
+        } catch (err) {
+            console.error('Notification error:', err);
+        }
 
         res.status(201).json(labResult);
     } catch (error) {
