@@ -290,6 +290,31 @@ exports.getHospitalStats = async (req, res) => {
     }
 };
 
+// Get global platform statistics
+exports.getPlatformStats = async (req, res) => {
+    try {
+        if (!req.user.isSuperAdmin) {
+            return res.status(403).json({ error: 'Unauthorized' });
+        }
+
+        const totalHospitals = await Hospital.countDocuments();
+        const activeHospitals = await Hospital.countDocuments({ status: 'active' });
+        const totalUsers = await User.countDocuments();
+
+        res.json({
+            success: true,
+            data: {
+                totalHospitals,
+                activeHospitals,
+                totalUsers,
+            },
+        });
+    } catch (error) {
+        console.error('getPlatformStats error:', error);
+        res.status(500).json({ error: 'Failed to fetch platform stats' });
+    }
+};
+
 // Manage hospital features
 exports.updateHospitalFeatures = async (req, res) => {
     try {

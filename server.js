@@ -10,6 +10,10 @@ require('dotenv').config();
 
 const app = express();
 
+// Trust proxy if we're behind a load balancer (e.g. NGINX, AWS ELB, Heroku)
+// This ensures rate limiting works based on the actual client IP, not the proxy IP
+app.set('trust proxy', 1);
+
 // Middleware
 const corsOptions = {
     origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
@@ -62,6 +66,7 @@ const medicalRecordRoutes = require('./routes/api/v1/medicalRecordRoutes');
 const pharmacyRoutes = require('./routes/api/v1/pharmacyRoutes');
 const auditRoutes = require('./routes/api/v1/auditRoutes');
 const userRoutes = require('./routes/api/v1/userRoutes');
+const publicRoutes = require('./routes/api/v1/publicRoutes');
 
 // Mount API v1 routes
 app.use('/api/v1/auth', authRoutesV1);
@@ -71,6 +76,7 @@ app.use('/api/v1/patients', patientRoutesV1);
 app.use('/api/patients', patientRoutes);
 app.use('/api/v1/admin', adminRoutesV1);
 app.use('/api/v1/users', userRoutes);
+app.use('/api/v1/public', publicRoutes);
 
 // Multi-tenant SaaS routes
 app.use('/api/v1/super-admin', superAdminRoutes);

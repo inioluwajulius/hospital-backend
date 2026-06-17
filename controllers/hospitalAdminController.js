@@ -2,6 +2,7 @@ const User = require('../models/User');
 const Hospital = require('../models/Hospital');
 const HospitalAdmin = require('../models/HospitalAdmin');
 const crypto = require('crypto');
+const sendEmail = require('../utils/email');
 
 /**
  * Hospital Admin Controller
@@ -164,9 +165,16 @@ exports.inviteStaffMember = async (req, res) => {
             invitationEmail: email,
         });
 
-        // TODO: Send invitation email with link to set password
-        // const invitationLink = `${process.env.FRONTEND_URL}/invite/${invitationToken}`;
-        // await sendEmail(email, 'Hospital Invitation', { name, invitationLink });
+        // Send invitation email with link to set password
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+        const invitationLink = `${frontendUrl}/auth/accept-invite/${invitationToken}`;
+        const message = `Hello ${name},\n\nYou have been invited to join the hospital portal as a ${role.toUpperCase()}.\n\nPlease click the following link to accept your invitation and set your password:\n${invitationLink}\n\nThis link will expire in 7 days.`;
+        
+        await sendEmail({
+            email: email,
+            subject: 'Hospital Portal Invitation',
+            message: message
+        });
 
         res.status(201).json({
             success: true,

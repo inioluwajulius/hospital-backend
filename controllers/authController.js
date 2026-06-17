@@ -107,14 +107,28 @@ exports.register = async (req, res) => {
                 return res.status(400).json({ message: 'Patients must use personal email domains: @gmail.com, @yahoo.com, @outlook.com, @hotmail.com, @aol.com, or @mail.com' });
             }
         }
+        if (!isValidEmailDomain(normalizedEmail, userType)) {
+            if (userType === 'staff') {
+                return res.status(400).json({ message: 'Staff must use hospital email domains: @hospital.com, @healthcare.com, or @medical.com' });
+            } else if (userType === 'patient') {
+                return res.status(400).json({ message: 'Patients must use personal email domains: @gmail.com, @yahoo.com, @outlook.com, @hotmail.com, @aol.com, or @mail.com' });
+            }
+        }
 
         if (!isStrongPassword(password)) {
             return res.status(400).json({ message: PASSWORD_REQUIREMENTS_MESSAGE });
         }
 
-        const existingUser = await User.findOne({ email: normalizedEmail });
+        const query = { email: normalizedEmail };
+        if (effectiveHospitalId) {
+            query.hospitalId = effectiveHospitalId;
+        } else {
+            query.isSuperAdmin = true; // SuperAdmins don't have hospitalId
+        }
+
+        const existingUser = await User.findOne(query);
         if (existingUser) {
-            return res.status(400).json({ message: 'Email already exists' });
+            return res.status(400).json({ message: 'Email already exists in this hospital' });
         }
 
         const hashedPassword = await bcrypt.hash(password, 10);
@@ -207,8 +221,8 @@ exports.register = async (req, res) => {
                     name,
                     email: normalizedEmail,
                     password: hashedPassword,
-                emailVerificationToken,
-                emailVerificationExpires,
+                    emailVerificationToken,
+                    emailVerificationExpires,
                     role: 'patient',
                     status: 'active', // Patients active immediately
                     hospitalId: effectiveHospitalId ? new mongoose.Types.ObjectId(effectiveHospitalId) : undefined,
@@ -225,7 +239,7 @@ exports.register = async (req, res) => {
                 await existing.save();
 
                 await sendVerificationEmail(newUser, verificationToken);
-            return res.status(201).json({
+                return res.status(201).json({
                     message: 'Registration successful! You can now access your medical records.',
                     userId: newUser._id,
                     patientCardNumber: existing.patientCardNumber,
@@ -241,7 +255,7 @@ exports.register = async (req, res) => {
                 emailVerificationToken,
                 emailVerificationExpires,
                 role: 'patient',
-                status: 'pending', // Patients pending admin verification
+                status: 'active', // Patients active immediately
                 hospitalId: effectiveHospitalId ? new mongoose.Types.ObjectId(effectiveHospitalId) : undefined,
                 patientCardNumber: patientCard
             });
@@ -251,7 +265,7 @@ exports.register = async (req, res) => {
             patientRecord = new Patient({
                 userId: newUser._id,
                 patientCardNumber: patientCard,
-                status: 'pending',
+                status: 'active',
                 registrationStatus: 'self_registered',
                 phone: phone || '',
                 gender: gender || '',
@@ -288,10 +302,10 @@ exports.register = async (req, res) => {
 
             await sendVerificationEmail(newUser, verificationToken);
             return res.status(201).json({
-                message: 'Registration successful! Your profile is pending admin verification. You will be notified once approved.',
+                message: 'Registration successful! You can now access your account.',
                 userId: newUser._id,
                 patientCardNumber: patientCard,
-                status: 'pending'
+                status: 'active'
             });
         }
 
@@ -318,10 +332,15 @@ exports.login = async (req, res) => {
             return res.status(400).json({ message: 'Invalid email format' });
         }
 
-        // Multi-tenant user lookup: find user by email and hospital (if provided)
+        // Multi-tenant user lookup: find user by email and hospital (if provided by body or subdomain)
+        let effectiveHospitalId = hospitalId || req.tenant?.id || req.tenant?.hospital?._id;
         const query = { email: normalizedEmail };
-        if (hospitalId) {
-            query.hospitalId = new mongoose.Types.ObjectId(hospitalId);
+        
+        if (effectiveHospitalId) {
+            query.hospitalId = new mongoose.Types.ObjectId(effectiveHospitalId);
+        } else {
+            // If no hospital context, they must be a Super Admin logging into the root platform
+            query.isSuperAdmin = true;
         }
 
         const existingUser = await User.findOne(query).select('+password');

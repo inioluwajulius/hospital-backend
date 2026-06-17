@@ -8,6 +8,12 @@ const invoiceSchema = new mongoose.Schema({
         required: true
     },
 
+    hospitalId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Hospital',
+        required: true
+    },
+
     items: [
         {
             description: String,

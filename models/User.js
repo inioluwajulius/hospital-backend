@@ -61,9 +61,7 @@ const userSchema = new mongoose.Schema({
     status: {
         type: String,
         enum: ['active', 'pending', 'rejected', 'inactive', 'suspended'],
-        default: function() {
-            return this.role === 'patient' ? 'pending' : 'active';
-        }
+        default: 'active'
     },
     
     // Patient-specific fields

@@ -8,9 +8,15 @@ const labTestSchema = new mongoose.Schema({
         required: true
     },
 
+    hospitalId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Hospital',
+        required: true
+    },
+
     doctorId: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'Doctor',
+        ref: 'User',
         required: true
     },
 
@@ -25,7 +31,7 @@ const labTestSchema = new mongoose.Schema({
 
     labTechnicianId: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'LabTechnician'
+        ref: 'User'
     },
     date: {
         type: Date,

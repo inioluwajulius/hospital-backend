@@ -2,6 +2,7 @@ const LabResult = require('../models/LabResult');
 const LabTest = require('../models/LabTest');
 const Notification = require('../models/Notification');
 const socketService = require('../socket');
+const Patient = require('../models/Patient');
 
 /**
  * Create lab test result
@@ -13,7 +14,7 @@ exports.createLabResult = async (req, res) => {
 
         const testOrder = `LAB-${Date.now()}`;
 
-        const labResult = new LabResult({
+        const labResultData = {
             patientId,
             doctorId,
             testOrder,
@@ -23,14 +24,20 @@ exports.createLabResult = async (req, res) => {
             results,
             notes,
             attachments,
-            labTechnician: req.user.id,
+            labTechnician: req.user.userId,
             status: 'completed'
-        });
+        };
+
+        if (req.tenantFilter && req.tenantFilter.hospitalId) {
+            labResultData.hospitalId = req.tenantFilter.hospitalId;
+        }
+
+        const labResult = new LabResult(labResultData);
 
         await labResult.save();
         await labResult.populate([
-            { path: 'patientId', select: 'name patientCardNumber userId' },
-            { path: 'doctorId', select: 'userId' }
+            { path: 'patientId', select: 'userId patientCardNumber', populate: { path: 'userId', select: 'name email' } },
+            { path: 'doctorId', select: 'name specialization' }
         ]);
 
         // Notifications
@@ -39,32 +46,32 @@ exports.createLabResult = async (req, res) => {
             
             if (labResult.patientId && labResult.patientId.userId) {
                 const notif = await Notification.create({
-                    recipient: labResult.patientId.userId,
-                    hospitalId: req.tenant?.id,
+                    recipient: labResult.patientId.userId._id || labResult.patientId.userId,
+                    hospitalId: req.tenantFilter?.hospitalId || labResult.hospitalId,
                     type: 'LAB_RESULT',
                     message: `New lab result available: ${testName}`,
                     link: '/patient/medical-records'
                 });
-                if (io) io.to(labResult.patientId.userId.toString()).emit('new_notification', notif);
+                if (io) io.to(notif.recipient.toString()).emit('new_notification', notif);
             }
 
-            if (labResult.doctorId && labResult.doctorId.userId) {
+            if (labResult.doctorId) {
                 const docNotif = await Notification.create({
-                    recipient: labResult.doctorId.userId,
-                    hospitalId: req.tenant?.id,
+                    recipient: labResult.doctorId._id || labResult.doctorId,
+                    hospitalId: req.tenantFilter?.hospitalId || labResult.hospitalId,
                     type: 'LAB_RESULT',
-                    message: `Lab result completed for patient: ${labResult.patientId.name}`,
+                    message: `Lab result completed for patient`,
                     link: '/doctor/lab-tests'
                 });
-                if (io) io.to(labResult.doctorId.userId.toString()).emit('new_notification', docNotif);
+                if (io) io.to(docNotif.recipient.toString()).emit('new_notification', docNotif);
             }
         } catch (err) {
             console.error('Notification error:', err);
         }
 
-        res.status(201).json(labResult);
+        res.status(201).json({ success: true, data: labResult });
     } catch (error) {
-        res.status(400).json({ message: error.message });
+        res.status(400).json({ success: false, error: error.message });
     }
 };
 
@@ -77,12 +84,15 @@ exports.getLabResults = async (req, res) => {
         const { patientId, status, testCategory } = req.query;
         let query = {};
 
+        if (req.tenantFilter && req.tenantFilter.hospitalId) {
+            query.hospitalId = req.tenantFilter.hospitalId;
+        }
+
         // Patient can only see their own results
         if (req.user.role === 'patient') {
-            if (!patientId) {
-                return res.status(400).json({ message: 'Patient must specify patientId' });
-            }
-            query.patientId = patientId;
+            const patientRecord = await Patient.findOne({ userId: req.user.userId });
+            if (!patientRecord) return res.json({ success: true, data: [] });
+            query.patientId = patientRecord._id;
         } else {
             if (patientId) query.patientId = patientId;
         }
@@ -91,14 +101,14 @@ exports.getLabResults = async (req, res) => {
         if (testCategory) query.testCategory = testCategory;
 
         const labResults = await LabResult.find(query)
-            .populate('patientId', 'name patientCardNumber')
+            .populate({ path: 'patientId', select: 'userId patientCardNumber', populate: { path: 'userId', select: 'name email' } })
             .populate('labTechnician', 'name')
-            .populate('doctorId', 'name')
+            .populate('doctorId', 'name specialization')
             .sort({ createdAt: -1 });
 
-        res.json(labResults);
+        res.json({ success: true, data: labResults });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        res.status(500).json({ success: false, error: error.message });
     }
 };
 
@@ -111,9 +121,14 @@ exports.updateLabResult = async (req, res) => {
         const { id } = req.params;
         const { notes, status } = req.body;
 
-        const labResult = await LabResult.findById(id);
+        let query = { _id: id };
+        if (req.tenantFilter && req.tenantFilter.hospitalId) {
+            query.hospitalId = req.tenantFilter.hospitalId;
+        }
+
+        const labResult = await LabResult.findOne(query);
         if (!labResult) {
-            return res.status(404).json({ message: 'Lab result not found' });
+            return res.status(404).json({ success: false, message: 'Lab result not found' });
         }
 
         // Only allow status/notes update, not results (compliance - immutable)
@@ -121,9 +136,9 @@ exports.updateLabResult = async (req, res) => {
         if (notes) labResult.notes = notes;
 
         await labResult.save();
-        res.json(labResult);
+        res.json({ success: true, data: labResult });
     } catch (error) {
-        res.status(400).json({ message: error.message });
+        res.status(400).json({ success: false, error: error.message });
     }
 };
 
@@ -133,15 +148,19 @@ exports.updateLabResult = async (req, res) => {
 exports.deleteLabResult = async (req, res) => {
     try {
         const { id } = req.params;
-        const labResult = await LabResult.findByIdAndDelete(id);
-
-        if (!labResult) {
-            return res.status(404).json({ message: 'Lab result not found' });
+        let query = { _id: id };
+        if (req.tenantFilter && req.tenantFilter.hospitalId) {
+            query.hospitalId = req.tenantFilter.hospitalId;
         }
 
-        res.json({ message: 'Lab result deleted (audit logged)', testOrder: labResult.testOrder });
+        const labResult = await LabResult.findOneAndDelete(query);
+        if (!labResult) {
+            return res.status(404).json({ success: false, message: 'Lab result not found' });
+        }
+
+        res.json({ success: true, message: 'Lab result deleted (audit logged)', testOrder: labResult.testOrder });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        res.status(500).json({ success: false, error: error.message });
     }
 };
 
@@ -151,35 +170,64 @@ exports.deleteLabResult = async (req, res) => {
  ***********************************************/
 
 exports.orderLabTest = async (req, res) => {
-
     try {
-        const labTest = new LabTest(req.body);
+        const labTestData = { ...req.body };
+        if (req.tenantFilter && req.tenantFilter.hospitalId) {
+            labTestData.hospitalId = req.tenantFilter.hospitalId;
+        }
+        if (req.user && req.user.role === 'doctor') {
+            labTestData.doctorId = req.user.userId;
+        }
 
+        const labTest = new LabTest(labTestData);
         await labTest.save();
-        res.status(201).json(labTest);
+        res.status(201).json({ success: true, data: labTest });
     } catch (error) {
-        res.status(400).json({ message: error.message });
+        res.status(400).json({ success: false, error: error.message });
     }
-
 };
 
 exports.getLabTests = async (req, res) => {
     try {
-        const labTests = await LabTest.find().populate('patientId').populate('doctorId').populate('labTechnicianId');
-        res.json(labTests);
+        let query = {};
+        if (req.tenantFilter && req.tenantFilter.hospitalId) {
+            query.hospitalId = req.tenantFilter.hospitalId;
+        }
+
+        if (req.user && req.user.role === 'patient') {
+            const patientRecord = await Patient.findOne({ userId: req.user.userId });
+            if (!patientRecord) return res.json({ success: true, data: [] });
+            query.patientId = patientRecord._id;
+        } else if (req.user && req.user.role === 'doctor') {
+            query.doctorId = req.user.userId;
+        }
+
+        const labTests = await LabTest.find(query)
+            .populate({ path: 'patientId', select: 'userId patientCardNumber', populate: { path: 'userId', select: 'name email' } })
+            .populate('doctorId', 'name specialization')
+            .populate('labTechnicianId', 'name');
+            
+        res.json({ success: true, data: labTests });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        res.status(500).json({ success: false, error: error.message });
     }
 };
 
 exports.updateLabTest = async (req, res) => {
     try {
         const { id } = req.params;
-        const { testName, testCategory, description } = req.body;
+        const { testName, testCategory, description, result } = req.body;
 
-        const labTest = await LabTest.findByIdAndUpdate(id, { testName, testCategory, description }, { new: true });
-        res.json(labTest);
+        let query = { _id: id };
+        if (req.tenantFilter && req.tenantFilter.hospitalId) {
+            query.hospitalId = req.tenantFilter.hospitalId;
+        }
+
+        const labTest = await LabTest.findOneAndUpdate(query, { testName, testCategory, description, result }, { new: true });
+        if (!labTest) return res.status(404).json({ success: false, message: 'LabTest not found' });
+        
+        res.json({ success: true, data: labTest });
     } catch (error) {
-        res.status(400).json({ message: error.message });
+        res.status(400).json({ success: false, error: error.message });
     }
 };

@@ -1,26 +1,30 @@
 const Prescription = require('../models/Prescription');
 const Notification = require('../models/Notification');
 const socketService = require('../socket');
+const Patient = require('../models/Patient');
+const User = require('../models/User');
 
-/**
- * Create prescription
- * DOCTOR only (licensed prescriber)
- */
 exports.createPrescription = async (req, res) => {
     try {
         const { patientId, medications, notes } = req.body;
-
-        const prescription = new Prescription({
+        
+        const prescriptionData = {
             patientId,
-            doctorId: req.user.id, // Authenticated doctor
+            doctorId: req.user.userId, // Authenticated doctor
             medications,
             notes,
             status: 'pending'
-        });
+        };
+
+        if (req.tenantFilter && req.tenantFilter.hospitalId) {
+            prescriptionData.hospitalId = req.tenantFilter.hospitalId;
+        }
+
+        const prescription = new Prescription(prescriptionData);
 
         await prescription.save();
         await prescription.populate([
-            { path: 'patientId', select: 'name patientCardNumber userId' },
+            { path: 'patientId', select: 'userId patientCardNumber', populate: { path: 'userId', select: 'name email' } },
             { path: 'doctorId', select: 'name specialization' }
         ]);
 
@@ -30,39 +34,40 @@ exports.createPrescription = async (req, res) => {
             
             if (prescription.patientId && prescription.patientId.userId) {
                 const notif = await Notification.create({
-                    recipient: prescription.patientId.userId,
-                    hospitalId: req.tenant?.id,
+                    recipient: prescription.patientId.userId._id || prescription.patientId.userId,
+                    hospitalId: req.tenantFilter?.hospitalId || prescription.hospitalId,
                     type: 'PRESCRIPTION',
                     message: `New prescription issued by Dr. ${prescription.doctorId?.name || 'your doctor'}`,
                     link: '/patient/prescriptions'
                 });
-                if (io) io.to(prescription.patientId.userId.toString()).emit('new_notification', notif);
+                if (io) io.to(notif.recipient.toString()).emit('new_notification', notif);
             }
         } catch (err) {
             console.error('Notification error:', err);
         }
 
-        res.status(201).json(prescription);
+        res.status(201).json({ success: true, data: prescription });
     } catch (error) {
-        res.status(400).json({ message: error.message });
+        res.status(400).json({ success: false, error: error.message });
     }
 };
 
-/**
- * Get prescriptions
- * ADMIN, DOCTOR, PHARMACIST, PATIENT (own only)
- */
 exports.getPrescriptions = async (req, res) => {
     try {
         const { patientId, status } = req.query;
         let query = {};
 
-        // Patient can only see their own prescriptions
+        if (req.tenantFilter && req.tenantFilter.hospitalId) {
+            query.hospitalId = req.tenantFilter.hospitalId;
+        }
+
         if (req.user.role === 'patient') {
-            const Patient = require('../models/Patient');
             const patientRecord = await Patient.findOne({ userId: req.user.userId });
-            if (!patientRecord) return res.json([]);
+            if (!patientRecord) return res.json({ success: true, data: [] });
             query.patientId = patientRecord._id;
+        } else if (req.user.role === 'doctor') {
+            query.doctorId = req.user.userId;
+            if (patientId) query.patientId = patientId;
         } else {
             if (patientId) query.patientId = patientId;
         }
@@ -70,55 +75,56 @@ exports.getPrescriptions = async (req, res) => {
         if (status) query.status = status;
 
         const prescriptions = await Prescription.find(query)
-            .populate('patientId', 'name patientCardNumber')
+            .populate({ path: 'patientId', select: 'userId patientCardNumber', populate: { path: 'userId', select: 'name email' } })
             .populate('doctorId', 'name specialization')
             .sort({ createdAt: -1 });
 
-        res.json(prescriptions);
+        res.json({ success: true, data: prescriptions });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        res.status(500).json({ success: false, error: error.message });
     }
 };
 
-/**
- * Update prescription (ADMIN ONLY via amendment system)
- * Never direct edit - create amendment for compliance
- */
 exports.updatePrescription = async (req, res) => {
     try {
         const { id } = req.params;
         const { status, notes } = req.body;
-
-        const prescription = await Prescription.findById(id);
-        if (!prescription) {
-            return res.status(404).json({ message: 'Prescription not found' });
+        
+        let query = { _id: id };
+        if (req.tenantFilter && req.tenantFilter.hospitalId) {
+            query.hospitalId = req.tenantFilter.hospitalId;
         }
 
-        // Only allow status/notes, not medication details (immutable)
+        const prescription = await Prescription.findOne(query);
+        if (!prescription) {
+            return res.status(404).json({ success: false, message: 'Prescription not found' });
+        }
+
         if (status) prescription.status = status;
         if (notes) prescription.notes = notes;
 
         await prescription.save();
-        res.json(prescription);
+        res.json({ success: true, data: prescription });
     } catch (error) {
-        res.status(400).json({ message: error.message });
+        res.status(400).json({ success: false, error: error.message });
     }
 };
 
-/**
- * Delete/Revoke prescription (ADMIN ONLY - creates audit log)
- */
 exports.deletePrescription = async (req, res) => {
     try {
         const { id } = req.params;
-        const prescription = await Prescription.findByIdAndDelete(id);
-
-        if (!prescription) {
-            return res.status(404).json({ message: 'Prescription not found' });
+        let query = { _id: id };
+        if (req.tenantFilter && req.tenantFilter.hospitalId) {
+            query.hospitalId = req.tenantFilter.hospitalId;
         }
 
-        res.json({ message: 'Prescription revoked (audit logged)' });
+        const prescription = await Prescription.findOneAndDelete(query);
+        if (!prescription) {
+            return res.status(404).json({ success: false, message: 'Prescription not found' });
+        }
+
+        res.json({ success: true, message: 'Prescription revoked' });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        res.status(500).json({ success: false, error: error.message });
     }
 };

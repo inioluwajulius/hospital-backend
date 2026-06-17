@@ -1,5 +1,6 @@
 const Billing = require('../models/Billing');
 const Invoice = require('../models/Invoice');
+const Patient = require('../models/Patient');
 
 /**
  * Create new billing invoice
@@ -9,10 +10,9 @@ exports.createBilling = async (req, res) => {
     try {
         const { patientId, items, subtotal, tax, totalAmount, dueDate, paymentMethod, notes } = req.body;
 
-        // Generate invoice number (YYYY-MMM-XXXXX format)
         const invoiceNumber = `INV-${Date.now()}`;
 
-        const billing = new Billing({
+        const billingData = {
             patientId,
             invoiceNumber,
             items,
@@ -23,14 +23,20 @@ exports.createBilling = async (req, res) => {
             dueDate,
             paymentMethod,
             notes,
-            createdBy: req.user.id
-        });
+            createdBy: req.user.userId
+        };
+
+        if (req.tenantFilter && req.tenantFilter.hospitalId) {
+            billingData.hospitalId = req.tenantFilter.hospitalId;
+        }
+
+        const billing = new Billing(billingData);
 
         await billing.save();
-        await billing.populate('patientId', 'name patientCardNumber');
-        res.status(201).json(billing);
+        await billing.populate({ path: 'patientId', select: 'userId patientCardNumber', populate: { path: 'userId', select: 'name email' } });
+        res.status(201).json({ success: true, data: billing });
     } catch (error) {
-        res.status(400).json({ message: error.message });
+        res.status(400).json({ success: false, error: error.message });
     }
 };
 
@@ -42,11 +48,15 @@ exports.getBilling = async (req, res) => {
     try {
         const { patientId, status } = req.query;
         let query = {};
+        
+        if (req.tenantFilter && req.tenantFilter.hospitalId) {
+            query.hospitalId = req.tenantFilter.hospitalId;
+        }
+
         // Patient can only see their own billing
         if (req.user && req.user.role === 'patient') {
-            const Patient = require('../models/Patient');
             const patientRecord = await Patient.findOne({ userId: req.user.userId });
-            if (!patientRecord) return res.json([]);
+            if (!patientRecord) return res.json({ success: true, data: [] });
             query.patientId = patientRecord._id;
         } else {
             if (patientId) query.patientId = patientId;
@@ -55,13 +65,13 @@ exports.getBilling = async (req, res) => {
         if (status) query.status = status;
 
         const billing = await Billing.find(query)
-            .populate('patientId', 'name patientCardNumber')
+            .populate({ path: 'patientId', select: 'userId patientCardNumber', populate: { path: 'userId', select: 'name email' } })
             .populate('createdBy', 'name email')
             .sort({ createdAt: -1 });
 
-        res.json(billing);
+        res.json({ success: true, data: billing });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        res.status(500).json({ success: false, error: error.message });
     }
 };
 
@@ -73,9 +83,14 @@ exports.updateBilling = async (req, res) => {
         const { id } = req.params;
         const { amountPaid, status, paymentMethod, notes } = req.body;
 
-        const billing = await Billing.findById(id);
+        let query = { _id: id };
+        if (req.tenantFilter && req.tenantFilter.hospitalId) {
+            query.hospitalId = req.tenantFilter.hospitalId;
+        }
+
+        const billing = await Billing.findOne(query);
         if (!billing) {
-            return res.status(404).json({ message: 'Billing record not found' });
+            return res.status(404).json({ success: false, message: 'Billing record not found' });
         }
 
         // Only allow updating payment status, not line items (compliance)
@@ -89,11 +104,11 @@ exports.updateBilling = async (req, res) => {
         if (notes) billing.notes = notes;
 
         await billing.save();
-        await billing.populate('patientId', 'name');
+        await billing.populate({ path: 'patientId', select: 'userId patientCardNumber', populate: { path: 'userId', select: 'name email' } });
 
-        res.json(billing);
+        res.json({ success: true, data: billing });
     } catch (error) {
-        res.status(400).json({ message: error.message });
+        res.status(400).json({ success: false, error: error.message });
     }
 };
 
@@ -103,15 +118,19 @@ exports.updateBilling = async (req, res) => {
 exports.deleteBilling = async (req, res) => {
     try {
         const { id } = req.params;
-        const billing = await Billing.findByIdAndDelete(id);
-
-        if (!billing) {
-            return res.status(404).json({ message: 'Billing record not found' });
+        let query = { _id: id };
+        if (req.tenantFilter && req.tenantFilter.hospitalId) {
+            query.hospitalId = req.tenantFilter.hospitalId;
         }
 
-        res.json({ message: 'Billing record deleted (audit logged)', invoiceNumber: billing.invoiceNumber });
+        const billing = await Billing.findOneAndDelete(query);
+        if (!billing) {
+            return res.status(404).json({ success: false, message: 'Billing record not found' });
+        }
+
+        res.json({ success: true, message: 'Billing record deleted (audit logged)', invoiceNumber: billing.invoiceNumber });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        res.status(500).json({ success: false, error: error.message });
     }
 };
 
@@ -119,49 +138,66 @@ exports.deleteBilling = async (req, res) => {
  * Invoice generation and management (ADMIN ONLY)
  ********************/
 exports.createInvoice = async (req, res) => {
-
     try {
-        const { patientId, items} = req.body;
+        const { patientId, items } = req.body;
 
         const totalAmount = items.reduce((sum, item) => sum + item.amount, 0);
 
-        const invoice = await new Invoice({
+        const invoiceData = {
             patientId,
             items,
             totalAmount
-        });
+        };
+        
+        if (req.tenantFilter && req.tenantFilter.hospitalId) {
+            invoiceData.hospitalId = req.tenantFilter.hospitalId;
+        }
+
+        const invoice = new Invoice(invoiceData);
 
         await invoice.save();
-        res.status(201).json(invoice);
+        res.status(201).json({ success: true, data: invoice });
     } catch (error) {
-        res.status(400).json({ message: error.message });
+        res.status(400).json({ success: false, error: error.message });
     }
 };
 
 exports.getInvoice = async (req, res) => {
     try {
-        const invoice = await Invoice.findById(req.params.id).populate('patientId', 'name patientCardNumber');
-        if (!invoice) {
-            return res.status(404).json({ message: 'Invoice not found' });
+        let query = { _id: req.params.id };
+        if (req.tenantFilter && req.tenantFilter.hospitalId) {
+            query.hospitalId = req.tenantFilter.hospitalId;
         }
-        res.json(invoice);
-    } catch (error) {
-        res.status(500).json({ message: error.message });
 
+        const invoice = await Invoice.findOne(query).populate({ path: 'patientId', select: 'userId patientCardNumber', populate: { path: 'userId', select: 'name email' } });
+        if (!invoice) {
+            return res.status(404).json({ success: false, message: 'Invoice not found' });
+        }
+        res.json({ success: true, data: invoice });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
     }
 };
 
 exports.payInvoice = async (req, res) => {
     try {
-        const invoice = await Invoice.findByIdAndUpdate(
-            req.params.id,
-            { status: 'Paid', paidAt: new Date() },
+        let query = { _id: req.params.id };
+        if (req.tenantFilter && req.tenantFilter.hospitalId) {
+            query.hospitalId = req.tenantFilter.hospitalId;
+        }
+        
+        const invoice = await Invoice.findOneAndUpdate(
+            query,
+            { status: 'paid' },
             { new: true }
-        ).populate('patientId', 'name patientCardNumber');
-        res.json(invoice);
+        ).populate({ path: 'patientId', select: 'userId patientCardNumber', populate: { path: 'userId', select: 'name email' } });
+        
+        if (!invoice) return res.status(404).json({ success: false, message: 'Invoice not found' });
+        
+        res.json({ success: true, data: invoice });
 
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        res.status(500).json({ success: false, error: error.message });
     }
 };
 

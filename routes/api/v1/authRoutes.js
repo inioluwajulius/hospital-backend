@@ -3,23 +3,14 @@ const router = express.Router();
 
 const { register, login, verifyEmail, forgotPassword, resetPassword } = require('../../../controllers/authController');
 const authMiddleware = require('../../../middleware/authMiddleware');
-const rateLimit = require('express-rate-limit');
-
-// Rate limiting for auth routes to prevent brute force attacks
-const authLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 10, // Limit each IP to 10 requests per windowMs
-    message: { message: 'Too many requests from this IP, please try again after 15 minutes' },
-    standardHeaders: true,
-    legacyHeaders: false,
-});
+const { authLimiter, accountCreationLimiter } = require('../../../middleware/rateLimiter');
 
 /**
  * @route   POST /api/v1/auth/register
  * @desc    Register new user (patient or doctor)
  * @access  Public
  */
-router.post('/register', authLimiter, register);
+router.post('/register', accountCreationLimiter, register);
 
 /**
  * @route   POST /api/v1/auth/login

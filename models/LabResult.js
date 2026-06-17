@@ -7,6 +7,12 @@ const labResultSchema = new mongoose.Schema({
         required: true
     },
 
+    hospitalId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Hospital',
+        required: true
+    },
+
     testOrder: {
         type: String,
         unique: true,
@@ -15,7 +21,7 @@ const labResultSchema = new mongoose.Schema({
 
     doctorId: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'Doctor'
+        ref: 'User'
     },
 
     labTechnician: {

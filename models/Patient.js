@@ -21,8 +21,8 @@ const patientSchema = new mongoose.Schema({
 
     status: {
         type: String,
-        enum: ['pending', 'active', 'rejected'],
-        default: 'pending'
+        enum: ['active', 'inactive'],
+        default: 'active'
     },
 
     registrationStatus: {

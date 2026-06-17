@@ -3,7 +3,12 @@ const User = require('../models/User');
 // Get all pending users (doctors waiting for approval)
 exports.getPendingUsers = async (req, res) => {
     try {
-        const pendingUsers = await User.find({ status: 'pending' })
+        const query = { status: 'pending' };
+        if (req.tenantFilter && req.tenantFilter.hospitalId) {
+            query.hospitalId = req.tenantFilter.hospitalId;
+        }
+
+        const pendingUsers = await User.find(query)
             .select('-password')
             .sort({ createdAt: -1 });
 
@@ -19,8 +24,13 @@ exports.approveUser = async (req, res) => {
         const { userId } = req.params;
         const { notes } = req.body || {};
 
-        const user = await User.findByIdAndUpdate(
-            userId,
+        const query = { _id: userId };
+        if (req.tenantFilter && req.tenantFilter.hospitalId) {
+            query.hospitalId = req.tenantFilter.hospitalId;
+        }
+
+        const user = await User.findOneAndUpdate(
+            query,
             { 
                 status: 'active',
                 approvedAt: new Date(),
@@ -30,7 +40,7 @@ exports.approveUser = async (req, res) => {
         ).select('-password');
 
         if (!user) {
-            return res.status(404).json({ message: 'User not found' });
+            return res.status(404).json({ message: 'User not found in this hospital' });
         }
 
         res.json({ 
@@ -52,8 +62,13 @@ exports.rejectUser = async (req, res) => {
             return res.status(400).json({ message: 'Rejection reason is required' });
         }
 
-        const user = await User.findByIdAndUpdate(
-            userId,
+        const query = { _id: userId };
+        if (req.tenantFilter && req.tenantFilter.hospitalId) {
+            query.hospitalId = req.tenantFilter.hospitalId;
+        }
+
+        const user = await User.findOneAndUpdate(
+            query,
             { 
                 status: 'rejected',
                 rejectionReason: reason,
@@ -63,7 +78,7 @@ exports.rejectUser = async (req, res) => {
         ).select('-password');
 
         if (!user) {
-            return res.status(404).json({ message: 'User not found' });
+            return res.status(404).json({ message: 'User not found in this hospital' });
         }
 
         res.json({ 

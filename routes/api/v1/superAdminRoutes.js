@@ -20,6 +20,9 @@ const requireSuperAdmin = (req, res, next) => {
 router.use(authMiddleware);
 router.use(requireSuperAdmin);
 
+// Global Platform Stats
+router.get('/stats', superAdminController.getPlatformStats);
+
 // Hospital Management
 router.get('/hospitals', superAdminController.getAllHospitals);
 router.post('/hospitals', superAdminController.createHospital);

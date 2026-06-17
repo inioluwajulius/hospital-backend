@@ -4,7 +4,7 @@ const router = express.Router();
 const authMiddleware = require('../../../middleware/authMiddleware');
 const authorize = require('../../../middleware/roleMiddleware');
 
-const { createPatient, getPatients, updatePatient, deletePatient, searchPatients, getPendingPatients, approvePatientRegistration, rejectPatientRegistration } = require('../../../controllers/patientController');
+const { createPatient, getPatients, updatePatient, deletePatient, searchPatients } = require('../../../controllers/patientController');
 
 /**
  * @route   GET /api/v1/patients
@@ -20,12 +20,7 @@ router.get('/', authMiddleware, getPatients);
  */
 router.get('/search/existing', searchPatients);
 
-/**
- * @route   GET /api/v1/patients/registrations/pending
- * @desc    Get all pending patient registrations (admin only)
- * @access  Private - Admin only
- */
-router.get('/registrations/pending', authMiddleware, authorize('admin'), getPendingPatients);
+
 
 /**
  * @route   POST /api/v1/patients
@@ -41,19 +36,7 @@ router.post('/', authMiddleware, authorize('admin', 'receptionist'), createPatie
  */
 router.put('/:id', authMiddleware, authorize('admin'), updatePatient);
 
-/**
- * @route   PUT /api/v1/patients/:patientId/approve
- * @desc    Approve pending patient registration (admin only)
- * @access  Private - Admin only
- */
-router.put('/:patientId/approve', authMiddleware, authorize('admin'), approvePatientRegistration);
 
-/**
- * @route   PUT /api/v1/patients/:patientId/reject
- * @desc    Reject pending patient registration (admin only)
- * @access  Private - Admin only
- */
-router.put('/:patientId/reject', authMiddleware, authorize('admin'), rejectPatientRegistration);
 
 /**
  * @route   DELETE /api/v1/patients/:id

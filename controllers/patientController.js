@@ -3,7 +3,12 @@ const User = require('../models/User');
 
 exports.createPatient = async (req, res) => {
     try {
-        const newPatient = new Patient(req.body);
+        const payload = { ...req.body };
+        if (req.tenantFilter && req.tenantFilter.hospitalId) {
+            payload.hospitalId = req.tenantFilter.hospitalId;
+        }
+
+        const newPatient = new Patient(payload);
         const savedPatient = await newPatient.save();
         res.status(201).json(savedPatient);
     } catch (error) {
@@ -13,21 +18,30 @@ exports.createPatient = async (req, res) => {
 
 exports.getPatients = async (req, res) => {
     try {
-        const patients = await Patient.find().populate('userId', 'name email');
-        res.json(patients);
+        const query = {};
+        if (req.tenantFilter && req.tenantFilter.hospitalId) {
+            query.hospitalId = req.tenantFilter.hospitalId;
+        }
+
+        const patients = await Patient.find(query).populate('userId', 'name email status');
+        res.json({ success: true, data: patients });
     } catch (error) {
         res.status(500).json({ message: 'Server error' });
-
     }
 };
 
 exports.updatePatient = async (req, res) => {
     try {
-        const updatedPatient = await Patient.findByIdAndUpdate(req.params.id, req.body, { new: true });
-        if (!updatedPatient) {
-            return res.status(404).json({ message: 'Patient not found' });
+        const query = { _id: req.params.id };
+        if (req.tenantFilter && req.tenantFilter.hospitalId) {
+            query.hospitalId = req.tenantFilter.hospitalId;
         }
-        res.json(updatedPatient);
+
+        const updatedPatient = await Patient.findOneAndUpdate(query, req.body, { new: true });
+        if (!updatedPatient) {
+            return res.status(404).json({ message: 'Patient not found in this hospital' });
+        }
+        res.json({ success: true, data: updatedPatient });
     } catch (error) {
         res.status(400).json({ message: error.message });
     }
@@ -35,11 +49,16 @@ exports.updatePatient = async (req, res) => {
 
 exports.deletePatient = async (req, res) => {
     try {
-        const deletedPatient = await Patient.findByIdAndDelete(req.params.id);
-        if (!deletedPatient) {
-            return res.status(404).json({ message: 'Patient not found' });
+        const query = { _id: req.params.id };
+        if (req.tenantFilter && req.tenantFilter.hospitalId) {
+            query.hospitalId = req.tenantFilter.hospitalId;
         }
-        res.json({ message: 'Patient deleted successfully' });
+
+        const deletedPatient = await Patient.findOneAndDelete(query);
+        if (!deletedPatient) {
+            return res.status(404).json({ message: 'Patient not found in this hospital' });
+        }
+        res.json({ success: true, message: 'Patient deleted successfully' });
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
@@ -54,97 +73,22 @@ exports.searchPatients = async (req, res) => {
             return res.status(400).json({ message: 'Search query is required' });
         }
 
-        // Search by name, patient ID, or phone
-        const patients = await Patient.find({
+        const dbQuery = {
             $or: [
                 { patientCardNumber: new RegExp(query, 'i') },
                 { phone: new RegExp(query, 'i') }
             ]
-        }).populate('userId', 'name email').select('-userId.password');
+        };
+
+        if (req.tenantFilter && req.tenantFilter.hospitalId) {
+            dbQuery.hospitalId = req.tenantFilter.hospitalId;
+        }
+
+        const patients = await Patient.find(dbQuery).populate('userId', 'name email').select('-userId.password');
 
         res.json(patients);
     } catch (error) {
         res.status(500).json({ message: 'Server error', error: error.message });
     }
 };
-
-// Get pending patient registrations (admin only)
-exports.getPendingPatients = async (req, res) => {
-    try {
-        const pendingPatients = await Patient.find({ status: 'pending' })
-            .populate('userId', 'name email createdAt')
-            .sort({ createdAt: -1 });
-
-        res.json(pendingPatients);
-    } catch (error) {
-        res.status(500).json({ message: 'Server error', error: error.message });
-    }
-};
-
-// Approve patient registration (admin only)
-exports.approvePatientRegistration = async (req, res) => {
-    try {
-        const { patientId } = req.params;
-        const { notes } = req.body;
-
-        const patient = await Patient.findByIdAndUpdate(
-            patientId,
-            { 
-                status: 'active',
-                approvedAt: new Date(),
-                approvalNotes: notes || ''
-            },
-            { new: true }
-        ).populate('userId', 'name email');
-
-        if (!patient) {
-            return res.status(404).json({ message: 'Patient not found' });
-        }
-
-        // Update corresponding user status
-        await User.findByIdAndUpdate(patient.userId._id, { status: 'active' });
-
-        res.json({ 
-            message: 'Patient approved successfully', 
-            patient 
-        });
-    } catch (error) {
-        res.status(500).json({ message: 'Server error', error: error.message });
-    }
-};
-
-// Reject patient registration (admin only)
-exports.rejectPatientRegistration = async (req, res) => {
-    try {
-        const { patientId } = req.params;
-        const { reason } = req.body;
-
-        if (!reason) {
-            return res.status(400).json({ message: 'Rejection reason is required' });
-        }
-
-        const patient = await Patient.findByIdAndUpdate(
-            patientId,
-            { 
-                status: 'rejected',
-                rejectionReason: reason,
-                rejectedAt: new Date()
-            },
-            { new: true }
-        ).populate('userId', 'name email');
-
-        if (!patient) {
-            return res.status(404).json({ message: 'Patient not found' });
-        }
-
-        // Update corresponding user status
-        await User.findByIdAndUpdate(patient.userId._id, { status: 'rejected' });
-
-        res.json({ 
-            message: 'Patient registration rejected', 
-            patient 
-        });
-    } catch (error) {
-        res.status(500).json({ message: 'Server error', error: error.message });
-    }
-};
+
