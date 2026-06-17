@@ -1,10 +1,10 @@
 const express = require('express');
 const router = express.Router();
 
-const authMiddleware = require('../middleware/authMiddleware');
-const authorize = require('../middleware/roleMiddleware');
+const authMiddleware = require('../../../middleware/authMiddleware');
+const authorize = require('../../../middleware/roleMiddleware');
 
-const { createAppointment, getAppointments, updateAppointment, deleteAppointment } = require('../controllers/appointmentController');
+const { createAppointment, getAppointments, updateAppointment, deleteAppointment } = require('../../../controllers/appointmentController');
 
 // GET - Read appointments (public access for testing)
 router.get('/', getAppointments);

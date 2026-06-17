@@ -1,10 +1,10 @@
 const express = require('express');
 const router = express.Router();
 
-const authMiddleware = require('../middleware/authMiddleware');
-const authorize = require('../middleware/roleMiddleware');
+const authMiddleware = require('../../../middleware/authMiddleware');
+const authorize = require('../../../middleware/roleMiddleware');
 
-const { createLabResult, getLabResults, updateLabResult, deleteLabResult, orderLabTest,getLabTests,updateLabTest } = require('../controllers/labController');
+const { createLabResult, getLabResults, updateLabResult, deleteLabResult, orderLabTest,getLabTests,updateLabTest } = require('../../../controllers/labController');
 
 // GET - Read lab results (admin, doctor, nurse, lab_technician, patient reads own)
 router.get('/', authMiddleware, authorize('admin', 'doctor', 'nurse', 'lab_technician', 'patient'), getLabResults);

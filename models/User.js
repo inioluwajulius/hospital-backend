@@ -16,6 +16,28 @@ const userSchema = new mongoose.Schema({
         select: false,
     },
     
+    // Email Verification & Password Reset
+    isEmailVerified: {
+        type: Boolean,
+        default: false,
+    },
+    emailVerificationToken: {
+        type: String,
+        select: false,
+    },
+    emailVerificationExpires: {
+        type: Date,
+        select: false,
+    },
+    resetPasswordToken: {
+        type: String,
+        select: false,
+    },
+    resetPasswordExpires: {
+        type: Date,
+        select: false,
+    },
+    
     // Multi-tenancy: Hospital/Tenant reference
     hospitalId: {
         type: mongoose.Schema.Types.ObjectId,
@@ -123,6 +145,8 @@ const stripSensitiveFields = (_, ret) => {
     delete ret.password;
     delete ret.invitationToken;
     delete ret.twoFactorSecret;
+    delete ret.emailVerificationToken;
+    delete ret.resetPasswordToken;
     delete ret.__v;
     return ret;
 };

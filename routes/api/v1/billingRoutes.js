@@ -1,14 +1,14 @@
-const express = require("express");
+const express = require('express');
 const router = express.Router();
 
-const authMiddleware = require("../middleware/authMiddleware");
-const authorize = require("../middleware/roleMiddleware");
+const authMiddleware = require('../../../middleware/authMiddleware');
+const authorize = require('../../../middleware/roleMiddleware');
 
 const {
 	createInvoice,
 	getInvoices,
 	payInvoice
-} = require("../controllers/billingController");
+} = require('../../../controllers/billingController');
 
 router.post("/", authMiddleware, authorize("accountant"), createInvoice);
 

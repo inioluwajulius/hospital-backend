@@ -12,7 +12,7 @@ const app = express();
 
 // Middleware
 const corsOptions = {
-    origin: process.env.CORS_ORIGIN || '*',
+    origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
     allowedHeaders: ['Content-Type', 'Authorization', 'x-hospital-id', 'x-tenant-id'],
     credentials: true,
@@ -52,16 +52,16 @@ const superAdminRoutes = require('./routes/api/v1/superAdminRoutes');
 const hospitalAdminRoutes = require('./routes/api/v1/hospitalAdminRoutes');
 const notificationRoutes = require('./routes/api/v1/notificationRoutes');
 
-// Legacy Routes (for backward compatibility)
-const appointmentRoutes = require('./routes/appointmentRoutes');
-const prescriptionRoutes = require('./routes/prescriptionRoutes');
-const labRoutes = require('./routes/labRoutes');
-const radiologyRoutes = require('./routes/radiologyRoutes');
-const billingRoutes = require('./routes/billingRoutes');
-const medicalRecordRoutes = require('./routes/medicalRecordRoutes');
-const pharmacyRoutes = require('./routes/pharmacyRoutes');
-const auditRoutes = require('./routes/auditRoutes');
-const userRoutes = require('./routes/userRoutes');
+// Migrated API v1 Routes
+const appointmentRoutes = require('./routes/api/v1/appointmentRoutes');
+const prescriptionRoutes = require('./routes/api/v1/prescriptionRoutes');
+const labRoutes = require('./routes/api/v1/labRoutes');
+const radiologyRoutes = require('./routes/api/v1/radiologyRoutes');
+const billingRoutes = require('./routes/api/v1/billingRoutes');
+const medicalRecordRoutes = require('./routes/api/v1/medicalRecordRoutes');
+const pharmacyRoutes = require('./routes/api/v1/pharmacyRoutes');
+const auditRoutes = require('./routes/api/v1/auditRoutes');
+const userRoutes = require('./routes/api/v1/userRoutes');
 
 // Mount API v1 routes
 app.use('/api/v1/auth', authRoutesV1);
@@ -77,16 +77,16 @@ app.use('/api/v1/super-admin', superAdminRoutes);
 app.use('/api/v1/hospital-admin', hospitalAdminRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
 
-// Legacy routes - backward compatibility
-app.use('/api/appointments', appointmentRoutes);
-app.use('/api/prescriptions', prescriptionRoutes);
-app.use('/api/lab', labRoutes);
-app.use('/api/radiology', radiologyRoutes);
-app.use('/api/billing', billingRoutes);
-app.use('/api/medical-records', medicalRecordRoutes);
-app.use('/api/pharmacy', pharmacyRoutes);
-app.use('/api/audit-logs', auditRoutes);
-app.use('/api/users', userRoutes);
+// Migrated API v1 Routes
+app.use('/api/v1/appointments', appointmentRoutes);
+app.use('/api/v1/prescriptions', prescriptionRoutes);
+app.use('/api/v1/lab', labRoutes);
+app.use('/api/v1/radiology', radiologyRoutes);
+app.use('/api/v1/billing', billingRoutes);
+app.use('/api/v1/medical-records', medicalRecordRoutes);
+app.use('/api/v1/pharmacy', pharmacyRoutes);
+app.use('/api/v1/audit-logs', auditRoutes);
+// Note: /api/v1/users is already mounted above, so we don't mount it twice
 
 // 404 handler
 app.use((req, res) => {

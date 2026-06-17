@@ -1,6 +1,6 @@
 const express = require('express');
-const AuditLog = require('../models/AuditLog');
-const authMiddleware = require('../middleware/authMiddleware');
+const AuditLog = require('../../../models/AuditLog');
+const authMiddleware = require('../../../middleware/authMiddleware');
 
 const router = express.Router();
 

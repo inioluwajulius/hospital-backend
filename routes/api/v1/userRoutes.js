@@ -1,8 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const authMiddleware = require('../middleware/authMiddleware');
-const authorize = require('../middleware/roleMiddleware');
-const { getPendingUsers, approveUser, rejectUser } = require('../controllers/userController');
+const authMiddleware = require('../../../middleware/authMiddleware');
+const authorize = require('../../../middleware/roleMiddleware');
+const { getPendingUsers, approveUser, rejectUser } = require('../../../controllers/userController');
 
 // GET - Get all pending users (doctors awaiting approval) - admin only
 router.get('/registrations/pending', authMiddleware, authorize('admin'), getPendingUsers);

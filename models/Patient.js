@@ -7,6 +7,12 @@ const patientSchema = new mongoose.Schema({
         required: true
     },
 
+    hospitalId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Hospital',
+        required: true
+    },
+
     patientCardNumber: {
         type: String,
         required: true,
@@ -26,6 +32,8 @@ const patientSchema = new mongoose.Schema({
     },
 
     dateOfBirth: Date,
+
+    age: Number,
 
     gender: String,
 

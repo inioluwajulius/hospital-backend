@@ -1,10 +1,10 @@
 const express = require('express');
 const router = express.Router();
 
-const authMiddleware = require('../middleware/authMiddleware');
-const authorize = require('../middleware/roleMiddleware');
+const authMiddleware = require('../../../middleware/authMiddleware');
+const authorize = require('../../../middleware/roleMiddleware');
 
-const { createPrescription, getPrescriptions, updatePrescription, deletePrescription } = require('../controllers/prescriptionController');
+const { createPrescription, getPrescriptions, updatePrescription, deletePrescription } = require('../../../controllers/prescriptionController');
 
 // GET - Read prescriptions (admin, doctor, pharmacist, patient reads own)
 router.get('/', authMiddleware, authorize('admin', 'doctor', 'pharmacist', 'patient'), getPrescriptions);

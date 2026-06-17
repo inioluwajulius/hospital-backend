@@ -5,6 +5,8 @@ const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
 const Notification = require("../models/Notification");
 const socketService = require("../socket");
+const crypto = require("crypto");
+const sendEmail = require("../utils/email");
 
 const PASSWORD_REQUIREMENTS_MESSAGE = 'Password must be at least 8 characters and include uppercase, lowercase, number, and special character';
 
@@ -66,6 +68,16 @@ const generatePatientCard = () => {
     return 'PAT-' + Math.floor(100000 + Math.random() * 900000);
 };
 
+
+const sendVerificationEmail = async (user, token) => {
+    const verifyUrl = `http://localhost:5173/auth/verify-email/${token}`;
+    const message = `Please verify your email by clicking on the link: \n\n ${verifyUrl}`;
+    try {
+        await sendEmail({ email: user.email, subject: 'Email Verification - MediCare System', message });
+    } catch (error) {
+        console.error('Error sending verification email', error);
+    }
+};
 exports.register = async (req, res) => {
     try {
         const { name, email, password, userType, role, phone, age, gender, bloodGroup, existingPatientId, specialization, licenseNumber, yearsOfExperience, hospitalId } = req.body || {};
@@ -77,7 +89,7 @@ exports.register = async (req, res) => {
         }
 
         let effectiveHospitalId = hospitalId || req.tenant?.id || req.tenant?.hospital?._id;
-        if (!effectiveHospitalId && userType === 'staff') {
+        if (!effectiveHospitalId) {
             const Hospital = require('../models/Hospital');
             const defaultHospital = await Hospital.findOne();
             if (defaultHospital) {
@@ -85,15 +97,9 @@ exports.register = async (req, res) => {
             }
         }
 
-        // For staff: hospitalId is required
         if (userType === 'staff' && !effectiveHospitalId) {
             return res.status(400).json({ message: 'Hospital ID required for staff registration' });
         }
-
-        if (!isValidEmail(normalizedEmail)) {
-            return res.status(400).json({ message: 'Invalid email format' });
-        }
-
         if (!isValidEmailDomain(normalizedEmail, userType)) {
             if (userType === 'staff') {
                 return res.status(400).json({ message: 'Staff must use hospital email domains: @hospital.com, @healthcare.com, or @medical.com' });
@@ -112,6 +118,9 @@ exports.register = async (req, res) => {
         }
 
         const hashedPassword = await bcrypt.hash(password, 10);
+        const verificationToken = crypto.randomBytes(32).toString('hex');
+        const emailVerificationToken = crypto.createHash('sha256').update(verificationToken).digest('hex');
+        const emailVerificationExpires = Date.now() + 24 * 60 * 60 * 1000;
 
         // === STAFF REGISTRATION ===
         if (userType === 'staff') {
@@ -135,6 +144,8 @@ exports.register = async (req, res) => {
                 name,
                 email: normalizedEmail,
                 password: hashedPassword,
+                emailVerificationToken,
+                emailVerificationExpires,
                 role: role.toLowerCase(),
                 status: Status, // Doctors pending, others active
                 hospitalId: effectiveHospitalId ? new mongoose.Types.ObjectId(effectiveHospitalId) : undefined,
@@ -172,6 +183,7 @@ exports.register = async (req, res) => {
             }
 
             // Tests expect a generic staff registration success message
+            await sendVerificationEmail(newUser, verificationToken);
             return res.status(201).json({ 
                 message: 'Staff registration successful',
                 userId: newUser._id
@@ -195,6 +207,8 @@ exports.register = async (req, res) => {
                     name,
                     email: normalizedEmail,
                     password: hashedPassword,
+                emailVerificationToken,
+                emailVerificationExpires,
                     role: 'patient',
                     status: 'active', // Patients active immediately
                     hospitalId: effectiveHospitalId ? new mongoose.Types.ObjectId(effectiveHospitalId) : undefined,
@@ -210,7 +224,8 @@ exports.register = async (req, res) => {
                 existing.bloodGroup = bloodGroup || existing.bloodGroup;
                 await existing.save();
 
-                return res.status(201).json({
+                await sendVerificationEmail(newUser, verificationToken);
+            return res.status(201).json({
                     message: 'Registration successful! You can now access your medical records.',
                     userId: newUser._id,
                     patientCardNumber: existing.patientCardNumber,
@@ -223,6 +238,8 @@ exports.register = async (req, res) => {
                 name,
                 email: normalizedEmail,
                 password: hashedPassword,
+                emailVerificationToken,
+                emailVerificationExpires,
                 role: 'patient',
                 status: 'pending', // Patients pending admin verification
                 hospitalId: effectiveHospitalId ? new mongoose.Types.ObjectId(effectiveHospitalId) : undefined,
@@ -269,6 +286,7 @@ exports.register = async (req, res) => {
                 }
             }
 
+            await sendVerificationEmail(newUser, verificationToken);
             return res.status(201).json({
                 message: 'Registration successful! Your profile is pending admin verification. You will be notified once approved.',
                 userId: newUser._id,
@@ -351,3 +369,51 @@ exports.login = async (req, res) => {
 
 exports.buildSafeUser = buildSafeUser;
 exports.PASSWORD_REQUIREMENTS_MESSAGE = PASSWORD_REQUIREMENTS_MESSAGE;
+exports.verifyEmail = async (req, res) => {
+    try {
+        const hashedToken = crypto.createHash('sha256').update(req.params.token).digest('hex');
+        const user = await User.findOne({
+            emailVerificationToken: hashedToken,
+            emailVerificationExpires: { $gt: Date.now() }
+        });
+        if (!user) { return res.status(400).json({ message: 'Token is invalid or has expired' }); }
+        user.isEmailVerified = true; user.emailVerificationToken = undefined; user.emailVerificationExpires = undefined;
+        await user.save();
+        res.status(200).json({ message: 'Email successfully verified' });
+    } catch (error) { res.status(500).json({ message: 'Server error', error: error.message }); }
+};
+
+exports.forgotPassword = async (req, res) => {
+    try {
+        const { email } = req.body;
+        const user = await User.findOne({ email: normalizeEmail(email) });
+        if (!user) { return res.status(404).json({ message: 'There is no user with that email address.' }); }
+        const resetToken = crypto.randomBytes(32).toString('hex');
+        user.resetPasswordToken = crypto.createHash('sha256').update(resetToken).digest('hex');
+        user.resetPasswordExpires = Date.now() + 10 * 60 * 1000;
+        await user.save({ validateBeforeSave: false });
+        const resetUrl = `http://localhost:5173/auth/reset-password/${resetToken}`;
+        const message = `Forgot your password? Reset it here: \n\n ${resetUrl}`;
+        try {
+            await sendEmail({ email: user.email, subject: 'Your password reset token', message });
+            res.status(200).json({ message: 'Token sent to email!' });
+        } catch (error) {
+            user.resetPasswordToken = undefined; user.resetPasswordExpires = undefined;
+            await user.save({ validateBeforeSave: false });
+            return res.status(500).json({ message: 'There was an error sending the email.' });
+        }
+    } catch (error) { res.status(500).json({ message: 'Server error', error: error.message }); }
+};
+
+exports.resetPassword = async (req, res) => {
+    try {
+        const hashedToken = crypto.createHash('sha256').update(req.params.token).digest('hex');
+        const user = await User.findOne({ resetPasswordToken: hashedToken, resetPasswordExpires: { $gt: Date.now() } });
+        if (!user) { return res.status(400).json({ message: 'Token is invalid or has expired' }); }
+        if (!isStrongPassword(req.body.password)) { return res.status(400).json({ message: PASSWORD_REQUIREMENTS_MESSAGE }); }
+        user.password = await bcrypt.hash(req.body.password, 10);
+        user.resetPasswordToken = undefined; user.resetPasswordExpires = undefined;
+        await user.save();
+        res.status(200).json({ message: 'Password successfully updated' });
+    } catch (error) { res.status(500).json({ message: 'Server error', error: error.message }); }
+};
