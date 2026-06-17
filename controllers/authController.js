@@ -100,20 +100,8 @@ exports.register = async (req, res) => {
         if (userType === 'staff' && !effectiveHospitalId) {
             return res.status(400).json({ message: 'Hospital ID required for staff registration' });
         }
-        if (!isValidEmailDomain(normalizedEmail, userType)) {
-            if (userType === 'staff') {
-                return res.status(400).json({ message: 'Staff must use hospital email domains: @hospital.com, @healthcare.com, or @medical.com' });
-            } else if (userType === 'patient') {
-                return res.status(400).json({ message: 'Patients must use personal email domains: @gmail.com, @yahoo.com, @outlook.com, @hotmail.com, @aol.com, or @mail.com' });
-            }
-        }
-        if (!isValidEmailDomain(normalizedEmail, userType)) {
-            if (userType === 'staff') {
-                return res.status(400).json({ message: 'Staff must use hospital email domains: @hospital.com, @healthcare.com, or @medical.com' });
-            } else if (userType === 'patient') {
-                return res.status(400).json({ message: 'Patients must use personal email domains: @gmail.com, @yahoo.com, @outlook.com, @hotmail.com, @aol.com, or @mail.com' });
-            }
-        }
+        // Email domain restriction removed to allow any valid email address for both staff and patients
+        // so you don't have to create fake hospital emails.
 
         if (!isStrongPassword(password)) {
             return res.status(400).json({ message: PASSWORD_REQUIREMENTS_MESSAGE });

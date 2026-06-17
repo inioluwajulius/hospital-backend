@@ -137,6 +137,13 @@ const hospitalSchema = new mongoose.Schema({
         industryType: String,
         bedCount: Number,
         departmentCount: Number,
+        hospitalType: {
+            type: String,
+            enum: ['General', 'Specialized Clinic', 'Dental', 'Maternity', 'Eye Center', 'Other'],
+            default: 'General'
+        },
+        taxId: String,
+        registrationNumber: String
     },
 }, { timestamps: true });
 
