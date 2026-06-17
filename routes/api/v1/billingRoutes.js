@@ -12,7 +12,7 @@ const {
 
 router.post("/", authMiddleware, authorize("accountant"), createInvoice);
 
-router.get("/", getInvoices);
+router.get("/", authMiddleware, getInvoices);
 
 router.put("/:id/pay", authMiddleware, authorize("accountant"), payInvoice);
 

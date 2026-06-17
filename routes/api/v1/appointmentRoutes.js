@@ -6,11 +6,11 @@ const authorize = require('../../../middleware/roleMiddleware');
 
 const { createAppointment, getAppointments, updateAppointment, deleteAppointment } = require('../../../controllers/appointmentController');
 
-// GET - Read appointments (public access for testing)
-router.get('/', getAppointments);
+// GET - Read appointments (secured for all authenticated users)
+router.get('/', authMiddleware, getAppointments);
 
-// POST - Create appointment (admin, receptionist only - appointment desk)
-router.post('/', authMiddleware, authorize('admin', 'receptionist'), createAppointment);
+// POST - Create appointment (admin, receptionist, patient)
+router.post('/', authMiddleware, authorize('admin', 'receptionist', 'patient'), createAppointment);
 
 // PUT - Update/reschedule appointment (ADMIN ONLY - audit required)
 router.put('/:id', authMiddleware, authorize('admin'), updateAppointment);

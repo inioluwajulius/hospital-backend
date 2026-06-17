@@ -4,24 +4,41 @@ const socketService = require('../socket');
 
 exports.createAppointment = async (req, res) => {
     try {
-        const appointment = new Appointment(req.body);
+        // If patient is creating their own appointment, force patientId
+        const appointmentData = { ...req.body };
+        if (req.user && req.user.role === 'patient') {
+            const Patient = require('../models/Patient');
+            const patientRecord = await Patient.findOne({ userId: req.user.userId });
+            if (!patientRecord) {
+                return res.status(404).json({ message: 'Patient profile not found' });
+            }
+            appointmentData.patientId = patientRecord._id;
+            appointmentData.status = 'scheduled'; // Default for patient-booked
+        }
+
+        const appointment = new Appointment(appointmentData);
 
         await appointment.save();
 
         // Notify Doctor
         if (appointment.doctorId) {
             try {
-                const notif = await Notification.create({
-                    recipient: appointment.doctorId,
-                    hospitalId: req.tenant?.id || appointment.hospitalId,
-                    type: 'APPOINTMENT',
-                    message: `New appointment scheduled for ${new Date(appointment.date).toLocaleDateString()}`,
-                    link: '/doctor/appointments'
-                });
+                const Doctor = require('../models/Doctor');
+                const doctorRecord = await Doctor.findById(appointment.doctorId);
+                
+                if (doctorRecord && doctorRecord.userId) {
+                    const notif = await Notification.create({
+                        recipient: doctorRecord.userId,
+                        hospitalId: req.tenant?.id || appointment.hospitalId,
+                        type: 'APPOINTMENT',
+                        message: `New appointment scheduled for ${new Date(appointment.appointmentDate).toLocaleDateString()}`,
+                        link: '/doctor/appointments'
+                    });
 
-                const io = socketService.getIO();
-                if (io) {
-                    io.to(appointment.doctorId.toString()).emit('new_notification', notif);
+                    const io = socketService.getIO();
+                    if (io) {
+                        io.to(doctorRecord.userId.toString()).emit('new_notification', notif);
+                    }
                 }
             } catch (err) {
                 console.error('Notification error:', err);
@@ -35,14 +52,23 @@ exports.createAppointment = async (req, res) => {
 };
 
 exports.getAppointments = async (req, res) => {
-
     try {
+        const query = {};
+        
+        // Filter by patient ID if requester is a patient
+        if (req.user && req.user.role === 'patient') {
+            const Patient = require('../models/Patient');
+            const patientRecord = await Patient.findOne({ userId: req.user.userId });
+            if (!patientRecord) {
+                return res.json([]); // No profile = no appointments
+            }
+            query.patientId = patientRecord._id;
+        }
 
-        const appointments = await Appointment.find().populate('patientId', 'name').populate('doctorId', 'name');
+        const appointments = await Appointment.find(query).populate('patientId', 'name').populate('doctorId', 'name');
         res.json(appointments);
     } catch (error) {
         res.status(500).json({ error: error.message });
-
     }
 };
 

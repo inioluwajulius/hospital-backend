@@ -42,8 +42,16 @@ exports.getBilling = async (req, res) => {
     try {
         const { patientId, status } = req.query;
         let query = {};
+        // Patient can only see their own billing
+        if (req.user && req.user.role === 'patient') {
+            const Patient = require('../models/Patient');
+            const patientRecord = await Patient.findOne({ userId: req.user.userId });
+            if (!patientRecord) return res.json([]);
+            query.patientId = patientRecord._id;
+        } else {
+            if (patientId) query.patientId = patientId;
+        }
 
-        if (patientId) query.patientId = patientId;
         if (status) query.status = status;
 
         const billing = await Billing.find(query)

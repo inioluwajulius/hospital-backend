@@ -26,3 +26,21 @@ exports.getPatientRecords = async (req, res) => {
         res.status(500).json({ message: error.message });
     }
 };
+
+exports.getAllRecords = async (req, res) => {
+    try {
+        let query = {};
+        if (req.user && req.user.role === 'patient') {
+            const Patient = require('../models/Patient');
+            const patientRecord = await Patient.findOne({ userId: req.user.userId });
+            if (!patientRecord) return res.json([]);
+            query.patientId = patientRecord._id;
+        }
+        const records = await MedicalRecord.find(query)
+            .populate('doctorId')
+            .populate('patientId');
+        res.json(records);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};

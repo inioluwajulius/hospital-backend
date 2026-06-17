@@ -11,7 +11,7 @@ const { createDoctor, getDoctors, updateDoctor, deleteDoctor } = require('../../
  * @desc    Get all doctors (doctors, admin, receptionist can view)
  * @access  Private
  */
-router.get('/', authMiddleware, authorize('admin', 'doctor', 'receptionist'), getDoctors);
+router.get('/', authMiddleware, authorize('admin', 'doctor', 'receptionist', 'patient'), getDoctors);
 
 /**
  * @route   POST /api/v1/doctors

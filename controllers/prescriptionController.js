@@ -59,10 +59,10 @@ exports.getPrescriptions = async (req, res) => {
 
         // Patient can only see their own prescriptions
         if (req.user.role === 'patient') {
-            if (!patientId) {
-                return res.status(400).json({ message: 'Patient must specify patientId' });
-            }
-            query.patientId = patientId;
+            const Patient = require('../models/Patient');
+            const patientRecord = await Patient.findOne({ userId: req.user.userId });
+            if (!patientRecord) return res.json([]);
+            query.patientId = patientRecord._id;
         } else {
             if (patientId) query.patientId = patientId;
         }
