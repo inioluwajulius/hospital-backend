@@ -248,6 +248,10 @@ exports.register = async (req, res) => {
             }
 
             // Case 2: Create new patient record
+            if (!effectiveHospitalId) {
+                return res.status(400).json({ message: 'System error: No hospital configured in the system. Please contact administration.' });
+            }
+
             const newUser = new User({
                 name,
                 email: normalizedEmail,
@@ -256,7 +260,7 @@ exports.register = async (req, res) => {
                 emailVerificationExpires,
                 role: 'patient',
                 status: 'active', // Patients active immediately
-                hospitalId: effectiveHospitalId ? new mongoose.Types.ObjectId(effectiveHospitalId) : undefined,
+                hospitalId: new mongoose.Types.ObjectId(effectiveHospitalId),
                 patientCardNumber: patientCard
             });
             await newUser.save();
@@ -264,6 +268,7 @@ exports.register = async (req, res) => {
             // Create corresponding patient record
             patientRecord = new Patient({
                 userId: newUser._id,
+                hospitalId: new mongoose.Types.ObjectId(effectiveHospitalId), // FIX: Missing hospitalId
                 patientCardNumber: patientCard,
                 status: 'active',
                 registrationStatus: 'self_registered',
@@ -275,29 +280,27 @@ exports.register = async (req, res) => {
             await patientRecord.save();
 
             // Notify hospital admins
-            if (effectiveHospitalId) {
-                try {
-                    const admins = await User.find({ role: 'hospital_admin', hospitalId: effectiveHospitalId });
-                    if (admins.length > 0) {
-                        const notifications = admins.map(admin => ({
-                            recipient: admin._id,
-                            hospitalId: effectiveHospitalId,
-                            type: 'REGISTRATION',
-                            message: `New patient registered: ${name}`,
-                            link: '/admin/patients'
-                        }));
-                        const savedNotifications = await Notification.insertMany(notifications);
-                        
-                        const io = socketService.getIO();
-                        if (io) {
-                            savedNotifications.forEach(notif => {
-                                io.to(notif.recipient.toString()).emit('new_notification', notif);
-                            });
-                        }
+            try {
+                const admins = await User.find({ role: 'hospital_admin', hospitalId: effectiveHospitalId });
+                if (admins.length > 0) {
+                    const notifications = admins.map(admin => ({
+                        recipient: admin._id,
+                        hospitalId: effectiveHospitalId,
+                        type: 'REGISTRATION',
+                        message: `New patient registered: ${name}`,
+                        link: '/admin/patients'
+                    }));
+                    const savedNotifications = await Notification.insertMany(notifications);
+                    
+                    const io = socketService.getIO();
+                    if (io) {
+                        savedNotifications.forEach(notif => {
+                            io.to(notif.recipient.toString()).emit('new_notification', notif);
+                        });
                     }
-                } catch (err) {
-                    console.error('Notification error:', err);
                 }
+            } catch (err) {
+                console.error('Notification error:', err);
             }
 
             await sendVerificationEmail(newUser, verificationToken);
