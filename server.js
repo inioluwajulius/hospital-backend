@@ -79,7 +79,7 @@ app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/public', publicRoutes);
 
 // Multi-tenant SaaS routes
-app.use('/api/v1/super-admin', superAdminRoutes);
+app.use('/api/v1/superadmin', superAdminRoutes);
 app.use('/api/v1/hospital-admin', hospitalAdminRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
 
