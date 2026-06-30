@@ -11,14 +11,8 @@ const sendEmail = async (options) => {
     let port = process.env.EMAIL_PORT;
 
     if (!host) {
-        const testAccount = await nodemailer.createTestAccount();
-        host = 'smtp.ethereal.email';
-        port = 587;
-        authOptions = {
-            user: testAccount.user,
-            pass: testAccount.pass,
-        };
-        console.log('Created Ethereal Test Account:', authOptions.user);
+        console.warn('⚠️ No EMAIL_HOST configured in environment variables. Email will NOT be sent.');
+        return;
     }
 
     const transporter = nodemailer.createTransport({
@@ -36,10 +30,7 @@ const sendEmail = async (options) => {
     };
 
     const info = await transporter.sendMail(mailOptions);
-    
-    if (host === 'smtp.ethereal.email') {
-        console.log('✉️ Test Email Preview URL: %s', nodemailer.getTestMessageUrl(info));
-    }
+    console.log('✉️ Email sent successfully');
 };
 
 module.exports = sendEmail;

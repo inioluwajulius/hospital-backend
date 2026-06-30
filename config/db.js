@@ -3,6 +3,10 @@ const mongoose = require('mongoose');
 
 // Work around local DNS servers that refuse SRV lookups used by mongodb+srv URIs.
 dns.setServers(['8.8.8.8', '1.1.1.1']);
+// Work around Node.js 17+ getaddrinfo ENOTFOUND issue on certain containers
+if (dns.setDefaultResultOrder) {
+    dns.setDefaultResultOrder('ipv4first');
+}
 
 /**
  * Connect to MongoDB Atlas with retry logic and enhanced error messaging
