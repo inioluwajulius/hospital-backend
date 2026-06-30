@@ -181,7 +181,7 @@ exports.register = async (req, res) => {
             }
 
             // Tests expect a generic staff registration success message
-            await sendVerificationEmail(newUser, verificationToken);
+            sendVerificationEmail(newUser, verificationToken);
             return res.status(201).json({ 
                 message: 'Staff registration successful',
                 userId: newUser._id
@@ -222,7 +222,7 @@ exports.register = async (req, res) => {
                 existing.bloodGroup = bloodGroup || existing.bloodGroup;
                 await existing.save();
 
-                await sendVerificationEmail(newUser, verificationToken);
+                sendVerificationEmail(newUser, verificationToken);
                 return res.status(201).json({
                     message: 'Registration successful! You can now access your medical records.',
                     userId: newUser._id,
@@ -287,7 +287,7 @@ exports.register = async (req, res) => {
                 console.error('Notification error:', err);
             }
 
-            await sendVerificationEmail(newUser, verificationToken);
+            sendVerificationEmail(newUser, verificationToken);
             return res.status(201).json({
                 message: 'Registration successful! You can now access your account.',
                 userId: newUser._id,
