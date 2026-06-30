@@ -44,7 +44,7 @@ router.get('/tenant/branding', (req, res) => {
 router.get('/hospitals', async (req, res) => {
     try {
         const Hospital = require('../../../models/Hospital');
-        const hospitals = await Hospital.find({ isActive: true }).select('name slug _id branding.primaryColor');
+        const hospitals = await Hospital.find({ status: 'active' }).select('name slug _id branding.primaryColor');
         
         res.json({
             success: true,
