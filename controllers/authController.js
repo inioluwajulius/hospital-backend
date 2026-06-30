@@ -70,7 +70,8 @@ const generatePatientCard = () => {
 
 
 const sendVerificationEmail = async (user, token) => {
-    const verifyUrl = `http://localhost:5173/auth/verify-email/${token}`;
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const verifyUrl = `${frontendUrl}/auth/verify-email/${token}`;
     const message = `Please verify your email by clicking on the link: \n\n ${verifyUrl}`;
     try {
         await sendEmail({ email: user.email, subject: 'Email Verification - MediCare System', message });
@@ -97,9 +98,6 @@ exports.register = async (req, res) => {
             }
         }
 
-        if (userType === 'staff' && !effectiveHospitalId) {
-            return res.status(400).json({ message: 'Hospital ID required for staff registration' });
-        }
         // Email domain restriction removed to allow any valid email address for both staff and patients
         // so you don't have to create fake hospital emails.
 
@@ -110,8 +108,6 @@ exports.register = async (req, res) => {
         const query = { email: normalizedEmail };
         if (effectiveHospitalId) {
             query.hospitalId = effectiveHospitalId;
-        } else {
-            query.isSuperAdmin = true; // SuperAdmins don't have hospitalId
         }
 
         const existingUser = await User.findOne(query);
@@ -325,28 +321,52 @@ exports.login = async (req, res) => {
 
         // Multi-tenant user lookup: find user by email and hospital (if provided by body or subdomain)
         let effectiveHospitalId = hospitalId || req.tenant?.id || req.tenant?.hospital?._id;
+
         const query = { email: normalizedEmail };
-        
         if (effectiveHospitalId) {
             query.hospitalId = new mongoose.Types.ObjectId(effectiveHospitalId);
+        }
+
+        const existingUsers = await User.find(query).populate('hospitalId', 'name').select('+password');
+
+        if (existingUsers.length === 0) {
+            return res.status(400).json({ message: 'Invalid email or password' });
+        }
+
+        // Find all matching users by password
+        const matchingUsers = [];
+        for (let user of existingUsers) {
+            if (typeof user.password === 'string' && user.password.length > 0) {
+                const isMatch = await bcrypt.compare(password, user.password);
+                if (isMatch) {
+                    matchingUsers.push(user);
+                }
+            }
+        }
+
+        if (matchingUsers.length === 0) {
+            return res.status(400).json({ message: 'Invalid email or password' });
+        }
+
+        let existingUser;
+        if (matchingUsers.length === 1) {
+            existingUser = matchingUsers[0];
         } else {
-            // If no hospital context, they must be a Super Admin logging into the root platform
-            query.isSuperAdmin = true;
-        }
-
-        const existingUser = await User.findOne(query).select('+password');
-
-        if (!existingUser) {
-            return res.status(400).json({ message: 'Invalid email or password' });
-        }
-
-        if (typeof existingUser.password !== 'string' || existingUser.password.length === 0) {
-            return res.status(400).json({ message: 'Invalid email or password' });
-        }
-
-        const isMatch = await bcrypt.compare(password, existingUser.password);
-        if (!isMatch) {
-            return res.status(400).json({ message: 'Invalid email or password' });
+            // Multiple users found with the same email and valid password.
+            if (!effectiveHospitalId) {
+                // Workspace Selection UX
+                const workspaces = matchingUsers.map(u => ({
+                    id: u.hospitalId?._id || 'default',
+                    name: u.hospitalId?.name || 'Default Hospital',
+                    role: u.role
+                }));
+                return res.status(300).json({
+                    message: 'Multiple workspaces found. Please select a hospital.',
+                    workspaces
+                });
+            } else {
+                existingUser = matchingUsers[0];
+            }
         }
 
         // Check if patient is approved
@@ -402,7 +422,8 @@ exports.forgotPassword = async (req, res) => {
         user.resetPasswordToken = crypto.createHash('sha256').update(resetToken).digest('hex');
         user.resetPasswordExpires = Date.now() + 10 * 60 * 1000;
         await user.save({ validateBeforeSave: false });
-        const resetUrl = `http://localhost:5173/auth/reset-password/${resetToken}`;
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+        const resetUrl = `${frontendUrl}/auth/reset-password/${resetToken}`;
         const message = `Forgot your password? Reset it here: \n\n ${resetUrl}`;
         try {
             await sendEmail({ email: user.email, subject: 'Your password reset token', message });

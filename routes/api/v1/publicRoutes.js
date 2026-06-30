@@ -37,4 +37,28 @@ router.get('/tenant/branding', (req, res) => {
     }
 });
 
+/**
+ * Public Hospitals List
+ * Fetches the list of all registered hospitals for the registration dropdown.
+ */
+router.get('/hospitals', async (req, res) => {
+    try {
+        const Hospital = require('../../../models/Hospital');
+        const hospitals = await Hospital.find({ isActive: true }).select('name slug _id branding.primaryColor');
+        
+        res.json({
+            success: true,
+            data: hospitals.map(h => ({
+                id: h._id,
+                name: h.name,
+                slug: h.slug,
+                color: h.branding?.primaryColor || '#0ea5e9'
+            }))
+        });
+    } catch (error) {
+        console.error('Failed to fetch hospitals:', error);
+        res.status(500).json({ error: 'Failed to fetch hospitals' });
+    }
+});
+
 module.exports = router;
