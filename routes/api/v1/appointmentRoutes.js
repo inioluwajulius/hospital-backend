@@ -12,8 +12,8 @@ router.get('/', authMiddleware, getAppointments);
 // POST - Create appointment (admin, receptionist, patient)
 router.post('/', authMiddleware, authorize('admin', 'receptionist', 'patient'), createAppointment);
 
-// PUT - Update/reschedule appointment (ADMIN ONLY - audit required)
-router.put('/:id', authMiddleware, authorize('admin'), updateAppointment);
+// PUT - Update/reschedule/cancel appointment
+router.put('/:id', authMiddleware, authorize('admin', 'receptionist', 'patient', 'doctor'), updateAppointment);
 
 // DELETE - Cancel appointment (ADMIN ONLY - creates audit log)
 router.delete('/:id', authMiddleware, authorize('admin'), deleteAppointment);
