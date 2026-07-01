@@ -12,6 +12,9 @@ const sendEmail = async (options) => {
 
     if (!host) {
         console.warn('⚠️ No EMAIL_HOST configured in environment variables. Email will NOT be sent.');
+        console.warn('📬 Would have sent to:', options.email);
+        console.warn('✉️ Subject:', options.subject);
+        console.warn('📝 Message:', options.text || options.html);
         return;
     }
 

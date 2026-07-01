@@ -16,7 +16,9 @@ app.set('trust proxy', 1);
 
 // Middleware
 const corsOptions = {
-    origin: [process.env.CORS_ORIGIN, 'http://localhost:5173', 'http://127.0.0.1:5173'].filter(Boolean),
+    origin: function(origin, callback) {
+        callback(null, true);
+    },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'x-hospital-id', 'x-tenant-id'],
     credentials: true,
