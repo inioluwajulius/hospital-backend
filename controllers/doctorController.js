@@ -52,9 +52,13 @@ exports.getDoctors = async (req, res) => {
     try {
         const query = { role: 'doctor' };
         
-        // Multi-tenant isolation: only fetch doctors for this hospital
+        // Multi-tenant isolation: fetch doctors for this hospital OR doctors with no hospital assigned
         if (req.tenantFilter && req.tenantFilter.hospitalId) {
-            query.hospitalId = req.tenantFilter.hospitalId;
+            query.$or = [
+                { hospitalId: req.tenantFilter.hospitalId },
+                { hospitalId: { $exists: false } },
+                { hospitalId: null }
+            ];
         }
 
         const doctors = await User.find(query).select('-password -__v -emailVerificationToken -resetPasswordToken');
