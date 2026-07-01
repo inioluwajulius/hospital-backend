@@ -36,6 +36,14 @@ const connectDB = async () => {
             
             console.log('\n✅ MongoDB Atlas connected successfully');
             console.log(`   Connected to: ${getClusterName()}`);
+            
+            try {
+                await mongoose.connection.collection('users').dropIndex('email_1');
+                console.log('✅ Successfully dropped old email_1 index!');
+            } catch (err) {
+                // Ignore if it doesn't exist
+            }
+            
             return true;
         } catch (error) {
             console.error(`\n❌ MongoDB connection attempt ${attempt}/${MAX_RETRIES} failed`);
