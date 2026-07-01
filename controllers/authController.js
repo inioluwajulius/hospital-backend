@@ -299,8 +299,9 @@ exports.register = async (req, res) => {
         return res.status(400).json({ message: 'Invalid user type. Must be "staff" or "patient"' });
 
     } catch (error) {
+        console.error('Registration Error:', error);
         return res.status(500).json({
-            message: 'Server error',
+            message: 'Server error: ' + error.message,
             error: error.message
         });
     }
