@@ -56,15 +56,21 @@ const tenantMiddleware = async (req, res, next) => {
                 identifiedBy = 'query';
             }
 
-            // Method 6: Extract from authenticated user
-            if (!hospital && req.user) {
-                if (req.user.hospitalId) {
-                    hospital = await Hospital.findById(req.user.hospitalId);
-                    identifiedBy = 'userHospital';
-                } else if (req.user.isSuperAdmin) {
-                    // SuperAdmin access - can access any hospital
-                    hospital = null; // Will be handled in route-specific logic
-                    identifiedBy = 'superAdmin';
+            // Method 6: Extract from JWT token
+            if (!hospital && req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
+                const token = req.headers.authorization.split(' ')[1];
+                try {
+                    const jwt = require('jsonwebtoken');
+                    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+                    if (decoded.hospitalId) {
+                        hospital = await Hospital.findById(decoded.hospitalId);
+                        identifiedBy = 'userHospital';
+                    } else if (decoded.isSuperAdmin) {
+                        hospital = null;
+                        identifiedBy = 'superAdmin';
+                    }
+                } catch (e) {
+                    // Ignore token errors here, let authMiddleware handle them
                 }
             }
         }

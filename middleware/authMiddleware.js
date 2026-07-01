@@ -20,6 +20,7 @@ const authMiddleware = (req, res, next) => {
 		req.user = {
 			id: decoded.userId,
 			_id: decoded.userId, // Alias for compatibility with controllers using _id
+			userId: decoded.userId, // Alias for compatibility with controllers using userId
 			role: decoded.role,
 			isSuperAdmin: decoded.isSuperAdmin,
 			hospitalId: decoded.hospitalId
