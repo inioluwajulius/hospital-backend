@@ -26,6 +26,11 @@ const appointmentSchema = new mongoose.Schema({
 
     reason: String,
 
+    isUrgent: {
+        type: Boolean,
+        default: false
+    },
+
     status: {
         type: String,
         enum: ['scheduled', 'completed', 'cancelled'],
