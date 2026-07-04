@@ -25,6 +25,14 @@ const medicalRecordSchema = new mongoose.Schema({
     ref: "Appointment"
   },
 
+  vitals: {
+    bloodPressure: String,
+    heartRate: Number,
+    weight: Number,
+    height: Number,
+    temperature: Number
+  },
+
   symptoms: String,
 
   diagnosis: String,

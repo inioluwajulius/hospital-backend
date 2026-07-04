@@ -23,8 +23,29 @@ exports.getPatients = async (req, res) => {
             query.hospitalId = req.tenantFilter.hospitalId;
         }
 
+        if (req.query.userId) {
+            query.userId = req.query.userId;
+        }
+
         const patients = await Patient.find(query).populate('userId', 'name email status');
         res.json({ success: true, data: patients });
+    } catch (error) {
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+
+exports.getPatientById = async (req, res) => {
+    try {
+        const query = { _id: req.params.id };
+        if (req.tenantFilter && req.tenantFilter.hospitalId) {
+            query.hospitalId = req.tenantFilter.hospitalId;
+        }
+        
+        const patient = await Patient.findOne(query).populate('userId', 'name email status');
+        if (!patient) {
+            return res.status(404).json({ message: 'Patient not found' });
+        }
+        res.json({ success: true, data: patient });
     } catch (error) {
         res.status(500).json({ message: 'Server error' });
     }
@@ -42,6 +63,33 @@ exports.updatePatient = async (req, res) => {
             return res.status(404).json({ message: 'Patient not found in this hospital' });
         }
         res.json({ success: true, data: updatedPatient });
+    } catch (error) {
+        res.status(400).json({ message: error.message });
+    }
+};
+
+exports.updatePatientProfile = async (req, res) => {
+    try {
+        const query = { userId: req.user.userId };
+        if (req.tenantFilter && req.tenantFilter.hospitalId) {
+            query.hospitalId = req.tenantFilter.hospitalId;
+        }
+
+        const patient = await Patient.findOne(query);
+        if (!patient) {
+            return res.status(404).json({ message: 'Patient profile not found' });
+        }
+
+        // Only allow updating safe fields
+        const { phone, address, emergencyContact, bloodGroup } = req.body;
+        
+        if (phone !== undefined) patient.phone = phone;
+        if (address !== undefined) patient.address = address;
+        if (emergencyContact !== undefined) patient.emergencyContact = emergencyContact;
+        if (bloodGroup !== undefined) patient.bloodGroup = bloodGroup;
+
+        await patient.save();
+        res.json({ success: true, data: patient });
     } catch (error) {
         res.status(400).json({ message: error.message });
     }

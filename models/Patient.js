@@ -49,6 +49,26 @@ const patientSchema = new mongoose.Schema({
 
     currentMedications: String,
 
+    insurance: {
+        provider: String,
+        policyNumber: String,
+        status: {
+            type: String,
+            enum: ['Active', 'Inactive', 'Expired'],
+            default: 'Active'
+        }
+    },
+
+    immunizations: [{
+        name: String,
+        date: Date,
+        status: {
+            type: String,
+            enum: ['completed', 'due', 'scheduled'],
+            default: 'completed'
+        }
+    }],
+
     approvedAt: Date,
 
     approvalNotes: String,
