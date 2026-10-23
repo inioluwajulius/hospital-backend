@@ -16,8 +16,16 @@ exports.createPrescription = async (req, res) => {
             status: 'pending'
         };
 
+        if (!patientId || !Array.isArray(medications) || medications.length === 0) {
+            return res.status(400).json({ success: false, error: 'patientId and at least one medication are required' });
+        }
+
         if (req.tenantFilter && req.tenantFilter.hospitalId) {
             prescriptionData.hospitalId = req.tenantFilter.hospitalId;
+            const patient = await Patient.findOne({ _id: patientId, hospitalId: prescriptionData.hospitalId }).select('_id');
+            if (!patient) {
+                return res.status(400).json({ success: false, error: 'Patient not found in this hospital' });
+            }
         }
 
         const prescription = new Prescription(prescriptionData);

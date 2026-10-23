@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const Hospital = require('../models/Hospital');
+const tokenHospitalId = require('../utils/tokenHospital');
 
 // Matches no document. Used so that an authenticated user without a hospital
 // gets an empty result instead of an unfiltered query.
@@ -47,7 +48,7 @@ const tenantMiddleware = async (req, res, next) => {
         req.userContext = {
             id: decoded.userId,
             isSuperAdmin: !!decoded.isSuperAdmin,
-            hospitalId: decoded.hospitalId || null,
+            hospitalId: tokenHospitalId(decoded),
             role: decoded.role,
         };
     }
@@ -56,7 +57,7 @@ const tenantMiddleware = async (req, res, next) => {
     let identifiedBy = null;
 
     if (decoded && !decoded.isSuperAdmin) {
-        hospitalId = decoded.hospitalId || null;
+        hospitalId = tokenHospitalId(decoded);
         identifiedBy = 'userHospital';
     } else {
         hospitalId = getRequestedHospitalId(req);

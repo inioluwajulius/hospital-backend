@@ -1,5 +1,6 @@
 const socketIo = require('socket.io');
 const jwt = require('jsonwebtoken');
+const tokenHospitalId = require('./utils/tokenHospital');
 
 let io;
 
@@ -31,9 +32,10 @@ module.exports = {
             socket.join(String(socket.user.userId));
             
             // If they belong to a hospital, join a hospital-wide room for role-based broadcasts
-            if (socket.user.hospitalId) {
-                socket.join(`hospital_${socket.user.hospitalId}`);
-                socket.join(`hospital_${socket.user.hospitalId}_${socket.user.role}`);
+            const hospitalId = tokenHospitalId(socket.user);
+            if (hospitalId) {
+                socket.join(`hospital_${hospitalId}`);
+                socket.join(`hospital_${hospitalId}_${socket.user.role}`);
             }
 
             socket.on('disconnect', () => {

@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const tokenHospitalId = require('../utils/tokenHospital');
 
 const authMiddleware = (req, res, next) => {
 	// Validate JWT_SECRET is configured
@@ -23,7 +24,7 @@ const authMiddleware = (req, res, next) => {
 			userId: decoded.userId, // Alias for compatibility with controllers using userId
 			role: decoded.role,
 			isSuperAdmin: decoded.isSuperAdmin,
-			hospitalId: decoded.hospitalId
+			hospitalId: tokenHospitalId(decoded)
 		};
 		next();
 	} catch (error) {
