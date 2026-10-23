@@ -4,6 +4,10 @@ const HospitalAdmin = require('../models/HospitalAdmin');
 const crypto = require('crypto');
 const sendEmail = require('../utils/email');
 
+// Roles a hospital admin may invite. Admin rights are granted via promoteToAdmin;
+// super_admin can never be granted from here.
+const INVITABLE_ROLES = ['doctor', 'nurse', 'receptionist', 'lab_technician', 'pharmacist', 'radiologist', 'accountant'];
+
 /**
  * Hospital Admin Controller
  * Handles hospital-level operations like inviting staff, managing users
@@ -135,6 +139,12 @@ exports.inviteStaffMember = async (req, res) => {
             });
         }
 
+        if (!INVITABLE_ROLES.includes(String(role).toLowerCase())) {
+            return res.status(400).json({
+                error: `Invalid role. Must be one of: ${INVITABLE_ROLES.join(', ')}`,
+            });
+        }
+
         // Check if user already exists in hospital
         const existingUser = await User.findOne({ email, hospitalId });
         if (existingUser) {
@@ -155,7 +165,7 @@ exports.inviteStaffMember = async (req, res) => {
             name,
             email,
             password: hashedTempPassword,
-            role,
+            role: String(role).toLowerCase(),
             hospitalId,
             status: 'pending',
             department,
@@ -313,6 +323,10 @@ exports.promoteToAdmin = async (req, res) => {
             return res.status(404).json({ error: 'User not found' });
         }
 
+        if (user.role === 'patient' || user.isSuperAdmin || user.status !== 'active') {
+            return res.status(400).json({ error: 'Only active staff members can be promoted to admin' });
+        }
+
         // Create HospitalAdmin record
         const hospitalAdmin = await HospitalAdmin.findOneAndUpdate(
             { userId, hospitalId },
@@ -353,13 +367,23 @@ exports.revokeAdminAccess = async (req, res) => {
             return res.status(400).json({ error: 'Hospital context required' });
         }
 
+        if (String(userId) === String(req.user._id)) {
+            return res.status(400).json({ error: 'You cannot revoke your own admin access' });
+        }
+
+        // Only hospital admins of this hospital can be demoted
+        const user = await User.findOneAndUpdate(
+            { _id: userId, hospitalId, role: 'hospital_admin', isSuperAdmin: { $ne: true } },
+            { role: 'doctor' }, // Or appropriate role
+        );
+        if (!user) {
+            return res.status(404).json({ error: 'Hospital admin not found' });
+        }
+
         await HospitalAdmin.findOneAndUpdate(
             { userId, hospitalId },
             { status: 'inactive' }
         );
-
-        // Update user role
-        await User.findByIdAndUpdate(userId, { role: 'doctor' }); // Or appropriate role
 
         res.json({
             success: true,

@@ -1,5 +1,6 @@
 const User = require("../models/User");
 const Patient = require("../models/Patient");
+const Hospital = require("../models/Hospital");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
@@ -13,6 +14,16 @@ const PASSWORD_REQUIREMENTS_MESSAGE = 'Password must be at least 8 characters an
 const normalizeEmail = (email) => {
     return typeof email === 'string' ? email.trim().toLowerCase() : '';
 };
+
+// Compare phone numbers by digits only so "0803 123 4567" matches "08031234567"
+const samePhone = (a, b) => {
+    const digits = (v) => String(v || '').replace(/\D/g, '');
+    return digits(a).length > 0 && digits(a) === digits(b);
+};
+
+// Roles that may self-register as staff. Both require hospital admin approval.
+// Other staff roles are created through hospital admin invitations.
+const SELF_REGISTER_STAFF_ROLES = ['DOCTOR', 'NURSE'];
 
 const isValidEmail = (email) => {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -79,6 +90,188 @@ const sendVerificationEmail = async (user, token) => {
         console.error('Error sending verification email', error);
     }
 };
+
+const handleStaffRegistration = async (req, res, { name, normalizedEmail, hashedPassword, verificationToken, emailVerificationToken, emailVerificationExpires, role, effectiveHospitalId, specialization, licenseNumber, yearsOfExperience }) => {
+    if (!role || !SELF_REGISTER_STAFF_ROLES.includes(String(role).toUpperCase())) {
+        return res.status(400).json({ message: 'Valid role required for staff (Doctor or Nurse)' });
+    }
+
+    const parsedYearsOfExperience =
+        yearsOfExperience === undefined || yearsOfExperience === null || yearsOfExperience === ''
+            ? undefined
+            : Number.parseInt(yearsOfExperience, 10);
+
+    if (role.toLowerCase() === 'doctor' && parsedYearsOfExperience !== undefined && Number.isNaN(parsedYearsOfExperience)) {
+        return res.status(400).json({ message: 'Years of experience must be a valid number' });
+    }
+
+    // Self-registered staff require hospital admin approval before they can log in
+    const Status = 'pending';
+
+    const newUser = new User({
+        name,
+        email: normalizedEmail,
+        password: hashedPassword,
+        emailVerificationToken,
+        emailVerificationExpires,
+        role: role.toLowerCase(),
+        status: Status,
+        hospitalId: effectiveHospitalId ? new mongoose.Types.ObjectId(effectiveHospitalId) : undefined,
+        // Doctor-specific fields
+        specialization: role.toLowerCase() === 'doctor' ? specialization : undefined,
+        licenseNumber: role.toLowerCase() === 'doctor' ? licenseNumber : undefined,
+        yearsOfExperience: role.toLowerCase() === 'doctor' ? parsedYearsOfExperience : undefined,
+    });
+    await newUser.save();
+
+    // Notify hospital admins
+    if (effectiveHospitalId) {
+        try {
+            const admins = await User.find({ role: 'hospital_admin', hospitalId: effectiveHospitalId });
+            if (admins.length > 0) {
+                const notifications = admins.map(admin => ({
+                    recipient: admin._id,
+                    hospitalId: effectiveHospitalId,
+                    type: 'REGISTRATION',
+                    message: `New staff member registered: ${name} (${role.toUpperCase()})`,
+                    link: '/admin/pending-approvals'
+                }));
+                const savedNotifications = await Notification.insertMany(notifications);
+                
+                const io = socketService.getIO();
+                if (io) {
+                    savedNotifications.forEach(notif => {
+                        io.to(notif.recipient.toString()).emit('new_notification', notif);
+                    });
+                }
+            }
+        } catch (err) {
+            console.error('Notification error:', err);
+        }
+    }
+
+    // Tests expect a generic staff registration success message
+    sendVerificationEmail(newUser, verificationToken);
+    return res.status(201).json({ 
+        message: 'Staff registration successful. Your account will be active once a hospital administrator approves it.',
+        userId: newUser._id
+    });
+};
+
+const handlePatientRegistration = async (req, res, { name, normalizedEmail, hashedPassword, verificationToken, emailVerificationToken, emailVerificationExpires, effectiveHospitalId, existingPatientId, phone, gender, age, bloodGroup }) => {
+    let patientRecord;
+    const patientCard = generatePatientCard();
+
+    // Case 1: Link to existing patient record
+    if (existingPatientId) {
+        if (!mongoose.isValidObjectId(existingPatientId)) {
+            return res.status(404).json({ message: 'Patient record not found' });
+        }
+        const existing = await Patient.findOne({ _id: existingPatientId, hospitalId: effectiveHospitalId });
+        // The caller must prove they own the record by supplying its phone number
+        if (!existing || !samePhone(phone, existing.phone)) {
+            return res.status(404).json({ message: 'Patient record not found' });
+        }
+        if (existing.userId) {
+            return res.status(400).json({ message: 'This patient record is already linked to an account. Please log in instead.' });
+        }
+
+        // Create user linked to existing patient
+        const newUser = new User({
+            name,
+            email: normalizedEmail,
+            password: hashedPassword,
+            emailVerificationToken,
+            emailVerificationExpires,
+            role: 'patient',
+            status: 'active', // Patients active immediately
+            hospitalId: effectiveHospitalId ? new mongoose.Types.ObjectId(effectiveHospitalId) : undefined,
+            patientCardNumber: existing.patientCardNumber
+        });
+        await newUser.save();
+
+        // Link the patient record to the new account
+        existing.userId = newUser._id;
+        existing.status = 'active';
+        existing.registrationStatus = 'existing_linked';
+        existing.gender = existing.gender || gender;
+        existing.bloodGroup = existing.bloodGroup || bloodGroup;
+        await existing.save();
+
+        sendVerificationEmail(newUser, verificationToken);
+        return res.status(201).json({
+            message: 'Registration successful! You can now access your medical records.',
+            userId: newUser._id,
+            patientCardNumber: existing.patientCardNumber,
+            status: 'active'
+        });
+    }
+
+    // Case 2: Create new patient record
+    if (!effectiveHospitalId) {
+        return res.status(400).json({ message: 'System error: No hospital configured in the system. Please contact administration.' });
+    }
+
+    const newUser = new User({
+        name,
+        email: normalizedEmail,
+        password: hashedPassword,
+        emailVerificationToken,
+        emailVerificationExpires,
+        role: 'patient',
+        status: 'active', // Patients active immediately
+        hospitalId: new mongoose.Types.ObjectId(effectiveHospitalId),
+        patientCardNumber: patientCard
+    });
+    await newUser.save();
+
+    // Create corresponding patient record
+    patientRecord = new Patient({
+        userId: newUser._id,
+        hospitalId: new mongoose.Types.ObjectId(effectiveHospitalId), // FIX: Missing hospitalId
+        patientCardNumber: patientCard,
+        status: 'active',
+        registrationStatus: 'self_registered',
+        phone: phone || '',
+        gender: gender || '',
+        age: age || null,
+        bloodGroup: bloodGroup || ''
+    });
+    await patientRecord.save();
+
+    // Notify hospital admins
+    try {
+        const admins = await User.find({ role: 'hospital_admin', hospitalId: effectiveHospitalId });
+        if (admins.length > 0) {
+            const notifications = admins.map(admin => ({
+                recipient: admin._id,
+                hospitalId: effectiveHospitalId,
+                type: 'REGISTRATION',
+                message: `New patient registered: ${name}`,
+                link: '/admin/patients'
+            }));
+            const savedNotifications = await Notification.insertMany(notifications);
+            
+            const io = socketService.getIO();
+            if (io) {
+                savedNotifications.forEach(notif => {
+                    io.to(notif.recipient.toString()).emit('new_notification', notif);
+                });
+            }
+        }
+    } catch (err) {
+        console.error('Notification error:', err);
+    }
+
+    sendVerificationEmail(newUser, verificationToken);
+    return res.status(201).json({
+        message: 'Registration successful! You can now access your account.',
+        userId: newUser._id,
+        patientCardNumber: patientCard,
+        status: 'active'
+    });
+};
+
 exports.register = async (req, res) => {
     try {
         const { name, email, password, userType, role, phone, age, gender, bloodGroup, existingPatientId, specialization, licenseNumber, yearsOfExperience, hospitalId } = req.body || {};
@@ -91,11 +284,14 @@ exports.register = async (req, res) => {
 
         let effectiveHospitalId = hospitalId || req.tenant?.id || req.tenant?.hospital?._id;
         if (!effectiveHospitalId) {
-            const Hospital = require('../models/Hospital');
-            const defaultHospital = await Hospital.findOne();
-            if (defaultHospital) {
-                effectiveHospitalId = defaultHospital._id.toString();
-            }
+            return res.status(400).json({ message: 'Hospital ID is required for registration' });
+        }
+        if (!mongoose.isValidObjectId(effectiveHospitalId)) {
+            return res.status(400).json({ message: 'Invalid hospital' });
+        }
+        const hospital = await Hospital.findById(effectiveHospitalId).select('status');
+        if (!hospital || hospital.status !== 'active') {
+            return res.status(400).json({ message: 'Invalid hospital' });
         }
 
         // Email domain restriction removed to allow any valid email address for both staff and patients
@@ -120,179 +316,21 @@ exports.register = async (req, res) => {
         const emailVerificationToken = crypto.createHash('sha256').update(verificationToken).digest('hex');
         const emailVerificationExpires = Date.now() + 24 * 60 * 60 * 1000;
 
-        // === STAFF REGISTRATION ===
+        const commonArgs = {
+            name, normalizedEmail, hashedPassword, verificationToken, emailVerificationToken, emailVerificationExpires, effectiveHospitalId
+        };
+
         if (userType === 'staff') {
-            if (!role || !['DOCTOR', 'NURSE', 'ADMIN', 'STAFF'].includes(role)) {
-                return res.status(400).json({ message: 'Valid role required for staff' });
-            }
-
-            const parsedYearsOfExperience =
-                yearsOfExperience === undefined || yearsOfExperience === null || yearsOfExperience === ''
-                    ? undefined
-                    : Number.parseInt(yearsOfExperience, 10);
-
-            if (role.toLowerCase() === 'doctor' && parsedYearsOfExperience !== undefined && Number.isNaN(parsedYearsOfExperience)) {
-                return res.status(400).json({ message: 'Years of experience must be a valid number' });
-            }
-
-            // Doctors require admin approval, other staff are active immediately
-            const Status = role.toLowerCase() === 'doctor' ? 'pending' : 'active';
-
-            const newUser = new User({
-                name,
-                email: normalizedEmail,
-                password: hashedPassword,
-                emailVerificationToken,
-                emailVerificationExpires,
-                role: role.toLowerCase(),
-                status: Status, // Doctors pending, others active
-                hospitalId: effectiveHospitalId ? new mongoose.Types.ObjectId(effectiveHospitalId) : undefined,
-                // Doctor-specific fields
-                specialization: role.toLowerCase() === 'doctor' ? specialization : undefined,
-                licenseNumber: role.toLowerCase() === 'doctor' ? licenseNumber : undefined,
-                yearsOfExperience: role.toLowerCase() === 'doctor' ? parsedYearsOfExperience : undefined,
-            });
-            await newUser.save();
-
-            // Notify hospital admins
-            if (effectiveHospitalId) {
-                try {
-                    const admins = await User.find({ role: 'hospital_admin', hospitalId: effectiveHospitalId });
-                    if (admins.length > 0) {
-                        const notifications = admins.map(admin => ({
-                            recipient: admin._id,
-                            hospitalId: effectiveHospitalId,
-                            type: 'REGISTRATION',
-                            message: `New staff member registered: ${name} (${role.toUpperCase()})`,
-                            link: role.toLowerCase() === 'doctor' ? '/admin/pending-approvals' : '/admin/doctors'
-                        }));
-                        const savedNotifications = await Notification.insertMany(notifications);
-                        
-                        const io = socketService.getIO();
-                        if (io) {
-                            savedNotifications.forEach(notif => {
-                                io.to(notif.recipient.toString()).emit('new_notification', notif);
-                            });
-                        }
-                    }
-                } catch (err) {
-                    console.error('Notification error:', err);
-                }
-            }
-
-            // Tests expect a generic staff registration success message
-            sendVerificationEmail(newUser, verificationToken);
-            return res.status(201).json({ 
-                message: 'Staff registration successful',
-                userId: newUser._id
+            return await handleStaffRegistration(req, res, {
+                ...commonArgs,
+                role, specialization, licenseNumber, yearsOfExperience
             });
         }
 
-        // === PATIENT REGISTRATION ===
         if (userType === 'patient') {
-            let patientRecord;
-            const patientCard = generatePatientCard();
-
-            // Case 1: Link to existing patient record
-            if (existingPatientId) {
-                const existing = await Patient.findById(existingPatientId);
-                if (!existing) {
-                    return res.status(404).json({ message: 'Patient record not found' });
-                }
-
-                // Create user linked to existing patient
-                const newUser = new User({
-                    name,
-                    email: normalizedEmail,
-                    password: hashedPassword,
-                    emailVerificationToken,
-                    emailVerificationExpires,
-                    role: 'patient',
-                    status: 'active', // Patients active immediately
-                    hospitalId: effectiveHospitalId ? new mongoose.Types.ObjectId(effectiveHospitalId) : undefined,
-                    patientCardNumber: existing.patientCardNumber
-                });
-                await newUser.save();
-
-                // Update patient record to mark as linked/registered
-                existing.status = 'active';
-                existing.registrationStatus = 'existing_linked';
-                existing.phone = phone || existing.phone;
-                existing.gender = gender || existing.gender;
-                existing.bloodGroup = bloodGroup || existing.bloodGroup;
-                await existing.save();
-
-                sendVerificationEmail(newUser, verificationToken);
-                return res.status(201).json({
-                    message: 'Registration successful! You can now access your medical records.',
-                    userId: newUser._id,
-                    patientCardNumber: existing.patientCardNumber,
-                    status: 'active'
-                });
-            }
-
-            // Case 2: Create new patient record
-            if (!effectiveHospitalId) {
-                return res.status(400).json({ message: 'System error: No hospital configured in the system. Please contact administration.' });
-            }
-
-            const newUser = new User({
-                name,
-                email: normalizedEmail,
-                password: hashedPassword,
-                emailVerificationToken,
-                emailVerificationExpires,
-                role: 'patient',
-                status: 'active', // Patients active immediately
-                hospitalId: new mongoose.Types.ObjectId(effectiveHospitalId),
-                patientCardNumber: patientCard
-            });
-            await newUser.save();
-
-            // Create corresponding patient record
-            patientRecord = new Patient({
-                userId: newUser._id,
-                hospitalId: new mongoose.Types.ObjectId(effectiveHospitalId), // FIX: Missing hospitalId
-                patientCardNumber: patientCard,
-                status: 'active',
-                registrationStatus: 'self_registered',
-                phone: phone || '',
-                gender: gender || '',
-                age: age || null,
-                bloodGroup: bloodGroup || ''
-            });
-            await patientRecord.save();
-
-            // Notify hospital admins
-            try {
-                const admins = await User.find({ role: 'hospital_admin', hospitalId: effectiveHospitalId });
-                if (admins.length > 0) {
-                    const notifications = admins.map(admin => ({
-                        recipient: admin._id,
-                        hospitalId: effectiveHospitalId,
-                        type: 'REGISTRATION',
-                        message: `New patient registered: ${name}`,
-                        link: '/admin/patients'
-                    }));
-                    const savedNotifications = await Notification.insertMany(notifications);
-                    
-                    const io = socketService.getIO();
-                    if (io) {
-                        savedNotifications.forEach(notif => {
-                            io.to(notif.recipient.toString()).emit('new_notification', notif);
-                        });
-                    }
-                }
-            } catch (err) {
-                console.error('Notification error:', err);
-            }
-
-            sendVerificationEmail(newUser, verificationToken);
-            return res.status(201).json({
-                message: 'Registration successful! You can now access your account.',
-                userId: newUser._id,
-                patientCardNumber: patientCard,
-                status: 'active'
+            return await handlePatientRegistration(req, res, {
+                ...commonArgs,
+                existingPatientId, phone, gender, age, bloodGroup
             });
         }
 
@@ -370,16 +408,15 @@ exports.login = async (req, res) => {
             }
         }
 
-        // Check if patient is approved
-        if (existingUser.role === 'patient' && existingUser.status === 'pending') {
-            return res.status(403).json({ message: 'Your account is pending admin approval. Please check back soon.' });
+        if (existingUser.status === 'pending') {
+            return res.status(403).json({ message: 'Your account is awaiting approval by hospital administration.' });
         }
 
-        if (existingUser.role === 'patient' && existingUser.status === 'rejected') {
+        if (existingUser.status === 'rejected') {
             return res.status(403).json({ message: 'Your registration has been rejected. Please contact hospital administration.' });
         }
 
-        if (existingUser.status === 'inactive') {
+        if (existingUser.status === 'inactive' || existingUser.status === 'suspended') {
             return res.status(403).json({ message: 'Your account has been deactivated. Please contact hospital administration.' });
         }
 
@@ -418,7 +455,8 @@ exports.forgotPassword = async (req, res) => {
     try {
         const { email } = req.body;
         const user = await User.findOne({ email: normalizeEmail(email) });
-        if (!user) { return res.status(404).json({ message: 'There is no user with that email address.' }); }
+        // Same response whether or not the account exists, so emails can't be enumerated
+        if (!user) { return res.status(200).json({ message: 'If an account exists for that email, a reset link has been sent.' }); }
         const resetToken = crypto.randomBytes(32).toString('hex');
         user.resetPasswordToken = crypto.createHash('sha256').update(resetToken).digest('hex');
         user.resetPasswordExpires = Date.now() + 10 * 60 * 1000;
@@ -428,7 +466,7 @@ exports.forgotPassword = async (req, res) => {
         const message = `Forgot your password? Reset it here: \n\n ${resetUrl}`;
         try {
             await sendEmail({ email: user.email, subject: 'Your password reset token', message });
-            res.status(200).json({ message: 'Token sent to email!' });
+            res.status(200).json({ message: 'If an account exists for that email, a reset link has been sent.' });
         } catch (error) {
             user.resetPasswordToken = undefined; user.resetPasswordExpires = undefined;
             await user.save({ validateBeforeSave: false });

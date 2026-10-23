@@ -1,4 +1,40 @@
 const Radiology = require('../models/Radiology');
+const Patient = require('../models/Patient');
+
+/**
+ * Build the patientId condition that limits radiology reports to what the
+ * caller may see. Reports are scoped through their patient, so this also
+ * covers reports created before Radiology had a hospitalId.
+ * Returns null when the caller may not see the requested patient.
+ */
+const patientScope = async (req, requestedPatientId) => {
+    if (req.user.role === 'patient') {
+        const own = await Patient.findOne({ userId: req.user.userId, ...(req.tenantFilter || {}) }).select('_id');
+        if (!own) return null;
+        if (requestedPatientId && String(requestedPatientId) !== String(own._id)) return null;
+        return own._id;
+    }
+
+    if (!req.tenantFilter?.hospitalId) {
+        // Super admin across all hospitals
+        return requestedPatientId || undefined;
+    }
+
+    if (requestedPatientId) {
+        const patient = await Patient.findOne({ _id: requestedPatientId, hospitalId: req.tenantFilter.hospitalId }).select('_id');
+        return patient ? patient._id : null;
+    }
+
+    const ids = await Patient.find({ hospitalId: req.tenantFilter.hospitalId }).distinct('_id');
+    return { $in: ids };
+};
+
+const findScopedRadiology = async (req, id) => {
+    const radiology = await Radiology.findById(id);
+    if (!radiology) return null;
+    const scope = await patientScope(req, radiology.patientId);
+    return scope ? radiology : null;
+};
 
 /**
  * Create radiology exam
@@ -8,10 +44,16 @@ exports.createRadiology = async (req, res) => {
     try {
         const { patientId, examType, bodyPart, reportFindings, impression, recommendations, imageCount, imageUrls, priority } = req.body;
 
+        const scope = await patientScope(req, patientId);
+        if (!patientId || !scope) {
+            return res.status(404).json({ message: 'Patient not found in this hospital' });
+        }
+
         const examOrder = `RAD-${Date.now()}`;
 
         const radiology = new Radiology({
             patientId,
+            hospitalId: req.tenantFilter?.hospitalId,
             examOrder,
             examType,
             bodyPart,
@@ -45,18 +87,15 @@ exports.getRadiology = async (req, res) => {
         const { patientId, status, examType } = req.query;
         let query = {};
 
-        // Patient can only see their own radiology
-        if (req.user.role === 'patient') {
-            if (!patientId) {
-                return res.status(400).json({ message: 'Patient must specify patientId' });
-            }
-            query.patientId = patientId;
-        } else {
-            if (patientId) query.patientId = patientId;
+        // Patients only see their own reports; staff only see their hospital's patients
+        const scope = await patientScope(req, typeof patientId === 'string' ? patientId : undefined);
+        if (scope === null) {
+            return res.json([]);
         }
+        if (scope !== undefined) query.patientId = scope;
 
-        if (status) query.status = status;
-        if (examType) query.examType = examType;
+        if (typeof status === 'string') query.status = status;
+        if (typeof examType === 'string') query.examType = examType;
 
         const radiology = await Radiology.find(query)
             .populate('patientId', 'name patientCardNumber')
@@ -79,7 +118,7 @@ exports.updateRadiology = async (req, res) => {
         const { id } = req.params;
         const { status, recommendations } = req.body;
 
-        const radiology = await Radiology.findById(id);
+        const radiology = await findScopedRadiology(req, id);
         if (!radiology) {
             return res.status(404).json({ message: 'Radiology report not found' });
         }
@@ -101,11 +140,13 @@ exports.updateRadiology = async (req, res) => {
 exports.deleteRadiology = async (req, res) => {
     try {
         const { id } = req.params;
-        const radiology = await Radiology.findByIdAndDelete(id);
+        const radiology = await findScopedRadiology(req, id);
 
         if (!radiology) {
             return res.status(404).json({ message: 'Radiology report not found' });
         }
+
+        await radiology.deleteOne();
 
         res.json({ message: 'Radiology report deleted (audit logged)', examOrder: radiology.examOrder });
     } catch (error) {

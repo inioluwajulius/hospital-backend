@@ -1,9 +1,26 @@
 const Patient = require('../models/Patient');
 const User = require('../models/User');
 
+// Clinical/demographic fields staff may set on a patient record. Ownership fields
+// (userId, hospitalId, patientCardNumber) are never taken from the request body.
+const EDITABLE_PATIENT_FIELDS = [
+    'dateOfBirth', 'age', 'gender', 'phone', 'address', 'bloodGroup', 'allergies',
+    'medicalHistory', 'currentMedications', 'insurance', 'immunizations', 'status',
+];
+
+const pickEditableFields = (body = {}) => {
+    const fields = {};
+    for (const key of EDITABLE_PATIENT_FIELDS) {
+        if (body[key] !== undefined) fields[key] = body[key];
+    }
+    return fields;
+};
+
+const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 exports.createPatient = async (req, res) => {
     try {
-        const payload = { ...req.body };
+        const payload = pickEditableFields(req.body);
         if (req.tenantFilter && req.tenantFilter.hospitalId) {
             payload.hospitalId = req.tenantFilter.hospitalId;
         }
@@ -23,7 +40,10 @@ exports.getPatients = async (req, res) => {
             query.hospitalId = req.tenantFilter.hospitalId;
         }
 
-        if (req.query.userId) {
+        if (req.user.role === 'patient') {
+            // Patients may only see their own record
+            query.userId = req.user.userId;
+        } else if (typeof req.query.userId === 'string') {
             query.userId = req.query.userId;
         }
 
@@ -39,6 +59,9 @@ exports.getPatientById = async (req, res) => {
         const query = { _id: req.params.id };
         if (req.tenantFilter && req.tenantFilter.hospitalId) {
             query.hospitalId = req.tenantFilter.hospitalId;
+        }
+        if (req.user.role === 'patient') {
+            query.userId = req.user.userId;
         }
         
         const patient = await Patient.findOne(query).populate('userId', 'name email status');
@@ -58,7 +81,7 @@ exports.updatePatient = async (req, res) => {
             query.hospitalId = req.tenantFilter.hospitalId;
         }
 
-        const updatedPatient = await Patient.findOneAndUpdate(query, req.body, { new: true });
+        const updatedPatient = await Patient.findOneAndUpdate(query, pickEditableFields(req.body), { new: true, runValidators: true });
         if (!updatedPatient) {
             return res.status(404).json({ message: 'Patient not found in this hospital' });
         }
@@ -115,26 +138,31 @@ exports.deletePatient = async (req, res) => {
 // Search for existing patients (for linking during registration)
 exports.searchPatients = async (req, res) => {
     try {
-        const { query } = req.query;
-        
-        if (!query || query.trim().length === 0) {
-            return res.status(400).json({ message: 'Search query is required' });
+        // Public endpoint used to link an existing hospital record during registration.
+        // Requires an exact card number AND phone number for one hospital, and only
+        // returns unlinked records with no personal details.
+        const { cardNumber, phone } = req.query;
+        const hospitalId = req.tenantFilter?.hospitalId;
+
+        if (typeof cardNumber !== 'string' || typeof phone !== 'string' || !cardNumber.trim() || !phone.trim()) {
+            return res.status(400).json({ message: 'Card number and phone number are required' });
+        }
+        if (!hospitalId) {
+            return res.status(400).json({ message: 'Please select your hospital' });
         }
 
-        const dbQuery = {
-            $or: [
-                { patientCardNumber: new RegExp(query, 'i') },
-                { phone: new RegExp(query, 'i') }
-            ]
-        };
+        const candidates = await Patient.find({
+            hospitalId,
+            patientCardNumber: new RegExp(`^${escapeRegex(cardNumber.trim())}$`, 'i'),
+            userId: { $exists: false },
+        }).select('patientCardNumber phone hospitalId');
 
-        if (req.tenantFilter && req.tenantFilter.hospitalId) {
-            dbQuery.hospitalId = req.tenantFilter.hospitalId;
-        }
+        const phoneDigits = phone.replace(/\D/g, '');
+        const matches = candidates
+            .filter((p) => phoneDigits.length > 0 && String(p.phone || '').replace(/\D/g, '') === phoneDigits)
+            .map((p) => ({ _id: p._id, patientCardNumber: p.patientCardNumber, hospitalId: p.hospitalId }));
 
-        const patients = await Patient.find(dbQuery).populate('userId', 'name email').select('-userId.password');
-
-        res.json(patients);
+        res.json(matches);
     } catch (error) {
         res.status(500).json({ message: 'Server error', error: error.message });
     }

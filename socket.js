@@ -13,8 +13,10 @@ module.exports = {
         });
 
         io.use((socket, next) => {
-            if (socket.handshake.query && socket.handshake.query.token) {
-                jwt.verify(socket.handshake.query.token, process.env.JWT_SECRET, (err, decoded) => {
+            // Prefer handshake.auth (not logged in URLs); query kept for older clients
+            const token = socket.handshake.auth?.token || socket.handshake.query?.token;
+            if (token) {
+                jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
                     if (err) return next(new Error('Authentication error'));
                     socket.user = decoded;
                     next();
@@ -23,10 +25,10 @@ module.exports = {
                 next(new Error('Authentication error'));
             }
         }).on('connection', (socket) => {
-            console.log(`Socket connected: ${socket.id} (User: ${socket.user.id})`);
+            console.log(`Socket connected: ${socket.id} (User: ${socket.user.userId})`);
 
-            // Join a private room for this specific user
-            socket.join(socket.user.id);
+            // Join a private room for this specific user (tokens carry userId)
+            socket.join(String(socket.user.userId));
             
             // If they belong to a hospital, join a hospital-wide room for role-based broadcasts
             if (socket.user.hospitalId) {
