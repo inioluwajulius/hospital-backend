@@ -43,10 +43,8 @@ module.exports = {
 
         return io;
     },
-    getIO: () => {
-        if (!io) {
-            throw new Error('Socket.io not initialized!');
-        }
-        return io;
-    }
+    // Returns null when Socket.IO isn't running (e.g. serverless deployments),
+    // so callers still save notifications and just skip the real-time push.
+    getIO: () => io || null
+
 };

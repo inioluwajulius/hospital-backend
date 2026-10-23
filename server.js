@@ -1,4 +1,5 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const cors = require('cors');
 const connectDB = require('./config/db');
 const auditMiddleware = require('./middleware/auditMiddleware');
@@ -31,6 +32,21 @@ app.use((req, res, next) => {
   req.id = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   next();
 });
+
+// Serverless (e.g. Vercel api/index.js) imports the app without calling startServer(),
+// so connect to MongoDB on the first request and reuse the connection afterwards.
+// Skipped under Jest (NODE_ENV=test) so tests never reach the real database.
+if (require.main !== module && process.env.NODE_ENV !== 'test') {
+    let dbReady = null;
+    app.use((req, res, next) => {
+        if (mongoose.connection.readyState === 1) return next();
+        dbReady = dbReady || connectDB().then((ok) => {
+            if (!ok) dbReady = null; // retry on the next request
+            return ok;
+        });
+        dbReady.then(() => next(), next);
+    });
+}
 
 // Audit logging middleware (logs all operations for HIPAA/GDPR compliance)
 app.use(auditMiddleware);
