@@ -120,6 +120,43 @@ exports.getRadiology = async (req, res) => {
 };
 
 /**
+ * File the report for an ordered exam (RADIOLOGIST)
+ * Once reviewed, the findings are immutable.
+ */
+exports.fileRadiologyReport = async (req, res) => {
+    try {
+        const { reportFindings, impression, recommendations, imageCount, imageUrls } = req.body;
+        if (!reportFindings || !impression) {
+            return res.status(400).json({ message: 'Findings and impression are required' });
+        }
+
+        const radiology = await findScopedRadiology(req, req.params.id);
+        if (!radiology) {
+            return res.status(404).json({ message: 'Radiology exam not found' });
+        }
+        if (radiology.status === 'reviewed' || radiology.status === 'completed') {
+            return res.status(400).json({ message: 'This exam already has a report' });
+        }
+
+        Object.assign(radiology, {
+            reportFindings,
+            impression,
+            recommendations,
+            imageCount,
+            imageUrls,
+            radiologist: req.user.userId,
+            examDate: radiology.examDate || new Date(),
+            reportGeneratedDate: new Date(),
+            status: 'reviewed',
+        });
+        await radiology.save();
+        res.json(radiology);
+    } catch (error) {
+        res.status(400).json({ message: error.message });
+    }
+};
+
+/**
  * Update radiology (ADMIN ONLY via amendment system)
  * Immutable report: amend instead of direct edit
  */

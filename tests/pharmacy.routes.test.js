@@ -8,8 +8,10 @@ process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret';
 
 const { app } = require('../server');
 
+const HOSPITAL_ID = '64b000000000000000000001';
+
 function makeToken(role, userId = '507f1f77bcf86cd799439011') {
-    return jwt.sign({ userId, role }, process.env.JWT_SECRET);
+    return jwt.sign({ userId, role, hospitalId: HOSPITAL_ID }, process.env.JWT_SECRET);
 }
 
 describe('Pharmacy routes auth and role checks', () => {
@@ -71,7 +73,7 @@ describe('Pharmacy routes auth and role checks', () => {
 
     it('returns 400 when admin tries deleting drug with stock > 0', async () => {
         const token = makeToken('admin');
-        Drug.findById = jest.fn().mockResolvedValue({
+        Drug.findOne = jest.fn().mockResolvedValue({
             _id: '507f1f77bcf86cd799439011',
             isActive: true,
             stock: 4

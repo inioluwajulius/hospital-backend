@@ -217,8 +217,8 @@ exports.acceptInvitation = async (req, res) => {
         const { token } = req.params;
         const { password } = req.body;
 
-        if (!password || password.length < 8) {
-            return res.status(400).json({ error: 'Password must be at least 8 characters' });
+        if (!password || !/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/.test(password)) {
+            return res.status(400).json({ error: 'Password must be at least 8 characters and include uppercase, lowercase, number, and special character' });
         }
 
         // Find user by invitation token

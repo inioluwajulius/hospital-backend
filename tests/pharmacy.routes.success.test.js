@@ -1,18 +1,24 @@
 jest.mock('../models/Drug');
 jest.mock('../models/Dispense');
+jest.mock('../models/Patient');
+jest.mock('../models/Prescription');
 
 const jwt = require('jsonwebtoken');
 const request = require('supertest');
 
 const Drug = require('../models/Drug');
 const Dispense = require('../models/Dispense');
+const Patient = require('../models/Patient');
+const Prescription = require('../models/Prescription');
 
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret';
 
 const { app } = require('../server');
 
+const HOSPITAL_ID = '64b000000000000000000001';
+
 function makeToken(role, userId = '507f1f77bcf86cd799439011') {
-    return jwt.sign({ userId, role }, process.env.JWT_SECRET);
+    return jwt.sign({ userId, role, hospitalId: HOSPITAL_ID }, process.env.JWT_SECRET);
 }
 
 describe('Pharmacy routes success paths', () => {
@@ -52,7 +58,7 @@ describe('Pharmacy routes success paths', () => {
 
         expect(response.statusCode).toBe(200);
         expect(response.body).toEqual([{ _id: 'drug-1', isActive: true }]);
-        expect(Drug.find).toHaveBeenCalledWith({ isActive: true });
+        expect(Drug.find).toHaveBeenCalledWith({ hospitalId: HOSPITAL_ID, isActive: true });
     });
 
     it('allows pharmacist to update stock', async () => {
@@ -80,7 +86,7 @@ describe('Pharmacy routes success paths', () => {
             stock: 0,
             save: jest.fn().mockResolvedValue()
         };
-        Drug.findById = jest.fn().mockResolvedValue(drug);
+        Drug.findOne = jest.fn().mockResolvedValue(drug);
 
         const response = await request(app)
             .delete('/api/v1/pharmacy/drugs/507f1f77bcf86cd799439011')
@@ -96,6 +102,9 @@ describe('Pharmacy routes success paths', () => {
     it('allows pharmacist to dispense a drug', async () => {
         const token = makeToken('pharmacist');
         Drug.findOneAndUpdate = jest.fn().mockResolvedValue({ _id: '507f1f77bcf86cd799439011', stock: 8 });
+        Patient.findOne = jest.fn().mockReturnValue({ select: jest.fn().mockResolvedValue({ _id: '507f1f77bcf86cd799439012' }) });
+        Prescription.findOne = jest.fn().mockReturnValue({ select: jest.fn().mockResolvedValue({ status: 'pending' }) });
+        Prescription.updateOne = jest.fn().mockResolvedValue({});
 
         const dispenseRecord = { _id: 'dispense-1', save: jest.fn().mockResolvedValue() };
         Dispense.mockImplementation(() => dispenseRecord);
@@ -114,10 +123,14 @@ describe('Pharmacy routes success paths', () => {
         expect(response.statusCode).toBe(201);
         expect(response.body.message).toBe('Drug dispensed successfully');
         expect(Drug.findOneAndUpdate).toHaveBeenCalledWith(
-            { _id: '507f1f77bcf86cd799439011', isActive: true, stock: { $gte: 2 } },
+            { _id: '507f1f77bcf86cd799439011', isActive: true, stock: { $gte: 2 }, hospitalId: HOSPITAL_ID },
             { $inc: { stock: -2 } },
             { new: true }
         );
         expect(dispenseRecord.save).toHaveBeenCalledTimes(1);
+        expect(Prescription.updateOne).toHaveBeenCalledWith(
+            { _id: '507f1f77bcf86cd799439013', hospitalId: HOSPITAL_ID },
+            { status: 'dispensed' }
+        );
     });
 });

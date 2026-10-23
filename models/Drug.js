@@ -1,6 +1,12 @@
 const mongoose = require('mongoose');
 
 const drugSchema = new mongoose.Schema({
+    // Each hospital keeps its own inventory
+    hospitalId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Hospital',
+        index: true
+    },
 
     name: {
         type: String,

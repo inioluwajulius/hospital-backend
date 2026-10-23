@@ -1,6 +1,11 @@
 const mongoose = require('mongoose');
 
 const dispenseSchema = new mongoose.Schema({
+    hospitalId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Hospital',
+        index: true
+    },
     patientId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Patient',
