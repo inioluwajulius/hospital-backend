@@ -25,6 +25,21 @@ const labTestSchema = new mongoose.Schema({
         required: true
     },
 
+    category: {
+        type: String,
+        enum: ['Blood', 'Urine', 'Biochemistry', 'Microbiology', 'Imaging', 'Other'],
+        default: 'Other'
+    },
+    priority: {
+        type: String,
+        enum: ['Normal', 'Urgent', 'STAT'],
+        default: 'Normal'
+    },
+    status: {
+        type: String,
+        enum: ['Pending', 'In-Progress', 'Completed'],
+        default: 'Pending'
+    },
     result: {
         type: String
     },

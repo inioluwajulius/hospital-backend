@@ -141,16 +141,36 @@ exports.createInvoice = async (req, res) => {
     try {
         const { patientId, items } = req.body;
 
-        const totalAmount = items.reduce((sum, item) => sum + item.amount, 0);
+        if (!patientId) {
+            return res.status(400).json({ success: false, error: 'patientId is required' });
+        }
+        if (!Array.isArray(items) || items.length === 0) {
+            return res.status(400).json({ success: false, error: 'At least one invoice item is required' });
+        }
+
+        // Coerce amounts to numbers so "100" + "50" can't concatenate to "10050"
+        const cleanItems = [];
+        for (const item of items) {
+            const amount = Number(item?.amount);
+            if (!Number.isFinite(amount) || amount < 0) {
+                return res.status(400).json({ success: false, error: 'Each item needs a non-negative numeric amount' });
+            }
+            cleanItems.push({ description: String(item.description || ''), amount });
+        }
+        const totalAmount = Math.round(cleanItems.reduce((sum, item) => sum + item.amount, 0) * 100) / 100;
 
         const invoiceData = {
             patientId,
-            items,
+            items: cleanItems,
             totalAmount
         };
-        
+
         if (req.tenantFilter && req.tenantFilter.hospitalId) {
             invoiceData.hospitalId = req.tenantFilter.hospitalId;
+            const patient = await Patient.findOne({ _id: patientId, hospitalId: invoiceData.hospitalId }).select('_id');
+            if (!patient) {
+                return res.status(400).json({ success: false, error: 'Patient not found in this hospital' });
+            }
         }
 
         const invoice = new Invoice(invoiceData);
@@ -186,14 +206,18 @@ exports.payInvoice = async (req, res) => {
             query.hospitalId = req.tenantFilter.hospitalId;
         }
         
+        // Only unpaid invoices can be paid (not cancelled or already paid ones)
+        query.status = 'unpaid';
+        const { paymentMethod } = req.body || {};
+
         const invoice = await Invoice.findOneAndUpdate(
             query,
-            { status: 'paid' },
-            { new: true }
+            { status: 'paid', ...(paymentMethod ? { paymentMethod } : {}) },
+            { new: true, runValidators: true }
         ).populate({ path: 'patientId', select: 'userId patientCardNumber', populate: { path: 'userId', select: 'name email' } });
         
-        if (!invoice) return res.status(404).json({ success: false, message: 'Invoice not found' });
-        
+        if (!invoice) return res.status(404).json({ success: false, message: 'Unpaid invoice not found' });
+
         res.json({ success: true, data: invoice });
 
     } catch (error) {
@@ -201,5 +225,35 @@ exports.payInvoice = async (req, res) => {
     }
 };
 
-// Backward-compatible alias used by billing routes.
-exports.getInvoices = exports.getBilling;
+/**
+ * List invoices (the collection written by createInvoice/payInvoice).
+ * Patients only see their own; staff see their hospital's.
+ */
+exports.getInvoices = async (req, res) => {
+    try {
+        const { patientId, status } = req.query;
+        const query = {};
+
+        if (req.tenantFilter && req.tenantFilter.hospitalId) {
+            query.hospitalId = req.tenantFilter.hospitalId;
+        }
+
+        if (req.user && req.user.role === 'patient') {
+            const patientRecord = await Patient.findOne({ userId: req.user.userId, ...(req.tenantFilter || {}) });
+            if (!patientRecord) return res.json({ success: true, data: [] });
+            query.patientId = patientRecord._id;
+        } else if (typeof patientId === 'string') {
+            query.patientId = patientId;
+        }
+
+        if (typeof status === 'string') query.status = status;
+
+        const invoices = await Invoice.find(query)
+            .populate({ path: 'patientId', select: 'userId patientCardNumber', populate: { path: 'userId', select: 'name email' } })
+            .sort({ createdAt: -1 });
+
+        res.json({ success: true, data: invoices });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};

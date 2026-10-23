@@ -19,9 +19,10 @@ const radiologySchema = new mongoose.Schema({
         required: true
     },
 
+    // Ordering doctor (doctors are Users)
     doctorId: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'Doctor'
+        ref: 'User'
     },
 
     radiologist: {

@@ -3,6 +3,7 @@ const router = express.Router();
 
 const { register, login, verifyEmail, forgotPassword, resetPassword } = require('../../../controllers/authController');
 const authMiddleware = require('../../../middleware/authMiddleware');
+const User = require('../../../models/User');
 const { authLimiter, accountCreationLimiter } = require('../../../middleware/rateLimiter');
 
 /**
@@ -45,13 +46,20 @@ router.post('/reset-password/:token', authLimiter, resetPassword);
  * @desc    Get current authenticated user info
  * @access  Private
  */
-router.get('/me', authMiddleware, (req, res) => {
+router.get('/me', authMiddleware, async (req, res) => {
     try {
+        // The token only carries id/role, so load name and email from the database
+        const user = await User.findById(req.user.userId).select('name email role status hospitalId');
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
         res.json({
-            id: req.user._id,
-            name: req.user.name,
-            email: req.user.email,
-            role: req.user.role
+            id: user._id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            status: user.status,
+            hospitalId: user.hospitalId
         });
     } catch (error) {
         res.status(500).json({ message: 'Error retrieving user info', error: error.message });

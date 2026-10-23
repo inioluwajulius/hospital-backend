@@ -4,7 +4,7 @@ const User = require('../models/User');
 // Clinical/demographic fields staff may set on a patient record. Ownership fields
 // (userId, hospitalId, patientCardNumber) are never taken from the request body.
 const EDITABLE_PATIENT_FIELDS = [
-    'dateOfBirth', 'age', 'gender', 'phone', 'address', 'bloodGroup', 'allergies',
+    'name', 'email', 'dateOfBirth', 'age', 'gender', 'phone', 'address', 'bloodGroup', 'allergies',
     'medicalHistory', 'currentMedications', 'insurance', 'immunizations', 'status',
 ];
 
@@ -21,12 +21,24 @@ const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 exports.createPatient = async (req, res) => {
     try {
         const payload = pickEditableFields(req.body);
-        if (req.tenantFilter && req.tenantFilter.hospitalId) {
-            payload.hospitalId = req.tenantFilter.hospitalId;
+        if (!req.tenantFilter || !req.tenantFilter.hospitalId) {
+            return res.status(400).json({ message: 'Hospital context required' });
         }
+        payload.hospitalId = req.tenantFilter.hospitalId;
+        payload.registrationStatus = 'new';
+        if (typeof payload.email === 'string') payload.email = payload.email.trim().toLowerCase();
 
-        const newPatient = new Patient(payload);
-        const savedPatient = await newPatient.save();
+        // Walk-in record: the patient can claim it later by registering with this
+        // card number and phone number. Retry on the rare card-number collision.
+        let savedPatient;
+        for (let attempt = 0; attempt < 5 && !savedPatient; attempt++) {
+            try {
+                payload.patientCardNumber = 'PAT-' + Math.floor(100000 + Math.random() * 900000);
+                savedPatient = await new Patient(payload).save();
+            } catch (err) {
+                if (err.code !== 11000 || attempt === 4) throw err;
+            }
+        }
         res.status(201).json(savedPatient);
     } catch (error) {
         res.status(400).json({ message: error.message });

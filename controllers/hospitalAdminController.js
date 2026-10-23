@@ -8,6 +8,17 @@ const sendEmail = require('../utils/email');
 // super_admin can never be granted from here.
 const INVITABLE_ROLES = ['doctor', 'nurse', 'receptionist', 'lab_technician', 'pharmacist', 'radiologist', 'accountant'];
 
+const sendInvitationEmail = ({ email, name, role, invitationToken }) => {
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const invitationLink = `${frontendUrl}/auth/accept-invite/${invitationToken}`;
+    const message = `Hello ${name},\n\nYou have been invited to join the hospital portal as a ${role.toUpperCase()}.\n\nPlease click the following link to accept your invitation and set your password:\n${invitationLink}\n\nThis link will expire in 7 days.`;
+    return sendEmail({
+        email,
+        subject: 'Hospital Portal Invitation',
+        message
+    });
+};
+
 /**
  * Hospital Admin Controller
  * Handles hospital-level operations like inviting staff, managing users
@@ -175,16 +186,14 @@ exports.inviteStaffMember = async (req, res) => {
             invitationEmail: email,
         });
 
-        // Send invitation email with link to set password
-        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-        const invitationLink = `${frontendUrl}/auth/accept-invite/${invitationToken}`;
-        const message = `Hello ${name},\n\nYou have been invited to join the hospital portal as a ${role.toUpperCase()}.\n\nPlease click the following link to accept your invitation and set your password:\n${invitationLink}\n\nThis link will expire in 7 days.`;
-        
-        await sendEmail({
-            email: email,
-            subject: 'Hospital Portal Invitation',
-            message: message
-        });
+        // Send invitation email with link to set password. If it fails, remove the
+        // pending user so the admin can retry the invitation.
+        try {
+            await sendInvitationEmail({ email, name, role: newUser.role, invitationToken });
+        } catch (emailError) {
+            await User.deleteOne({ _id: newUser._id });
+            return res.status(502).json({ error: 'Could not send the invitation email. Please try again.' });
+        }
 
         res.status(201).json({
             success: true,
@@ -273,6 +282,12 @@ exports.resendInvitation = async (req, res) => {
         user.invitationExpires = invitationExpires;
 
         await user.save();
+
+        try {
+            await sendInvitationEmail({ email: user.email, name: user.name, role: user.role, invitationToken });
+        } catch (emailError) {
+            return res.status(502).json({ error: 'Could not send the invitation email. Please try again.' });
+        }
 
         res.json({
             success: true,

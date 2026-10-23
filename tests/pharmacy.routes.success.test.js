@@ -27,7 +27,7 @@ describe('Pharmacy routes success paths', () => {
         Drug.mockImplementation(() => savedDrug);
 
         const response = await request(app)
-            .post('/api/pharmacy/drugs')
+            .post('/api/v1/pharmacy/drugs')
             .set('Authorization', `Bearer ${token}`)
             .send({
                 name: 'Amoxicillin',
@@ -47,7 +47,7 @@ describe('Pharmacy routes success paths', () => {
         Drug.find = jest.fn().mockResolvedValue([{ _id: 'drug-1', isActive: true }]);
 
         const response = await request(app)
-            .get('/api/pharmacy/drugs')
+            .get('/api/v1/pharmacy/drugs')
             .set('Authorization', `Bearer ${token}`);
 
         expect(response.statusCode).toBe(200);
@@ -64,7 +64,7 @@ describe('Pharmacy routes success paths', () => {
         });
 
         const response = await request(app)
-            .patch('/api/pharmacy/drugs/507f1f77bcf86cd799439011/stock')
+            .patch('/api/v1/pharmacy/drugs/507f1f77bcf86cd799439011/stock')
             .set('Authorization', `Bearer ${token}`)
             .send({ stock: 75 });
 
@@ -83,7 +83,7 @@ describe('Pharmacy routes success paths', () => {
         Drug.findById = jest.fn().mockResolvedValue(drug);
 
         const response = await request(app)
-            .delete('/api/pharmacy/drugs/507f1f77bcf86cd799439011')
+            .delete('/api/v1/pharmacy/drugs/507f1f77bcf86cd799439011')
             .set('Authorization', `Bearer ${token}`);
 
         expect(response.statusCode).toBe(200);
@@ -95,19 +95,13 @@ describe('Pharmacy routes success paths', () => {
 
     it('allows pharmacist to dispense a drug', async () => {
         const token = makeToken('pharmacist');
-        const drug = {
-            _id: '507f1f77bcf86cd799439011',
-            isActive: true,
-            stock: 10,
-            save: jest.fn().mockResolvedValue()
-        };
-        Drug.findById = jest.fn().mockResolvedValue(drug);
+        Drug.findOneAndUpdate = jest.fn().mockResolvedValue({ _id: '507f1f77bcf86cd799439011', stock: 8 });
 
         const dispenseRecord = { _id: 'dispense-1', save: jest.fn().mockResolvedValue() };
         Dispense.mockImplementation(() => dispenseRecord);
 
         const response = await request(app)
-            .post('/api/pharmacy/dispense')
+            .post('/api/v1/pharmacy/dispense')
             .set('Authorization', `Bearer ${token}`)
             .send({
                 patientId: '507f1f77bcf86cd799439012',
@@ -119,8 +113,11 @@ describe('Pharmacy routes success paths', () => {
 
         expect(response.statusCode).toBe(201);
         expect(response.body.message).toBe('Drug dispensed successfully');
-        expect(drug.stock).toBe(8);
-        expect(drug.save).toHaveBeenCalledTimes(1);
+        expect(Drug.findOneAndUpdate).toHaveBeenCalledWith(
+            { _id: '507f1f77bcf86cd799439011', isActive: true, stock: { $gte: 2 } },
+            { $inc: { stock: -2 } },
+            { new: true }
+        );
         expect(dispenseRecord.save).toHaveBeenCalledTimes(1);
     });
 });

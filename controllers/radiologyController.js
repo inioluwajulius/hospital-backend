@@ -38,7 +38,7 @@ const findScopedRadiology = async (req, id) => {
 
 /**
  * Create radiology exam
- * RADIOLOGIST only (licensed to interpret imaging)
+ * DOCTOR places an order (status "ordered"); RADIOLOGIST files a reviewed report
  */
 exports.createRadiology = async (req, res) => {
     try {
@@ -51,7 +51,17 @@ exports.createRadiology = async (req, res) => {
 
         const examOrder = `RAD-${Date.now()}`;
 
-        const radiology = new Radiology({
+        const isOrder = req.user.role === 'doctor';
+        const radiology = new Radiology(isOrder ? {
+            patientId,
+            hospitalId: req.tenantFilter?.hospitalId,
+            examOrder,
+            examType,
+            bodyPart,
+            doctorId: req.user.userId,
+            status: 'ordered',
+            priority
+        } : {
             patientId,
             hospitalId: req.tenantFilter?.hospitalId,
             examOrder,
@@ -64,13 +74,13 @@ exports.createRadiology = async (req, res) => {
             recommendations,
             imageCount,
             imageUrls,
-            radiologist: req.user.id,
+            radiologist: req.user.userId,
             status: 'reviewed',
             priority
         });
 
         await radiology.save();
-        await radiology.populate('patientId', 'name patientCardNumber');
+        await radiology.populate({ path: 'patientId', select: 'userId name patientCardNumber', populate: { path: 'userId', select: 'name' } });
 
         res.status(201).json(radiology);
     } catch (error) {
@@ -98,7 +108,7 @@ exports.getRadiology = async (req, res) => {
         if (typeof examType === 'string') query.examType = examType;
 
         const radiology = await Radiology.find(query)
-            .populate('patientId', 'name patientCardNumber')
+            .populate({ path: 'patientId', select: 'userId name patientCardNumber', populate: { path: 'userId', select: 'name' } })
             .populate('radiologist', 'name')
             .populate('doctorId', 'name')
             .sort({ createdAt: -1 });

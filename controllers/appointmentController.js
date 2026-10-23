@@ -49,6 +49,9 @@ exports.createAppointment = async (req, res) => {
             }
             appointmentData.patientId = patientRecord._id;
             appointmentData.status = 'scheduled'; // Default for patient-booked
+        } else if (req.user && req.user.role === 'doctor') {
+            // Doctors book appointments for themselves
+            appointmentData.doctorId = req.user.userId;
         }
 
         const referenceError = await validateReferences(req, appointmentData);

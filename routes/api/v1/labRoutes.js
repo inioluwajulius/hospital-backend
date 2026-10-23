@@ -19,12 +19,12 @@ router.put('/:id', authMiddleware, authorize('admin'), updateLabResult);
 router.delete('/:id', authMiddleware, authorize('admin'), deleteLabResult);
 
 // GET - Read lab tests (admin only)
-router.get('/tests', authMiddleware, authorize('admin'), getLabTests);
+router.get('/tests', authMiddleware, authorize('admin', 'doctor', 'nurse', 'lab_technician', 'patient'), getLabTests);
 
 // POST - Order lab test (admin only)
-router.post('/tests', authMiddleware, authorize('admin'), orderLabTest);
+router.post('/tests', authMiddleware, authorize('admin', 'doctor'), orderLabTest);
 
 // PUT - Update lab test (admin only)
-router.put('/tests/:id', authMiddleware, authorize('admin'), updateLabTest);
+router.put('/tests/:id', authMiddleware, authorize('admin', 'lab_technician'), updateLabTest);
 
 module.exports = router;

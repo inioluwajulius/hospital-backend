@@ -18,7 +18,7 @@ describe('Pharmacy routes auth and role checks', () => {
     });
 
     it('requires auth for pharmacy drugs list endpoint', async () => {
-        const response = await request(app).get('/api/pharmacy/drugs');
+        const response = await request(app).get('/api/v1/pharmacy/drugs');
 
         expect(response.statusCode).toBe(401);
         expect(response.body).toEqual({ message: 'Not authorized, token missing' });
@@ -28,7 +28,7 @@ describe('Pharmacy routes auth and role checks', () => {
         const token = makeToken('patient');
 
         const response = await request(app)
-            .post('/api/pharmacy/drugs')
+            .post('/api/v1/pharmacy/drugs')
             .set('Authorization', `Bearer ${token}`)
             .send({ name: 'Paracetamol', price: 50, stock: 10 });
 
@@ -40,7 +40,7 @@ describe('Pharmacy routes auth and role checks', () => {
         const token = makeToken('nurse');
 
         const response = await request(app)
-            .patch('/api/pharmacy/drugs/507f1f77bcf86cd799439011/stock')
+            .patch('/api/v1/pharmacy/drugs/507f1f77bcf86cd799439011/stock')
             .set('Authorization', `Bearer ${token}`)
             .send({ stock: 20 });
 
@@ -52,7 +52,7 @@ describe('Pharmacy routes auth and role checks', () => {
         const token = makeToken('doctor');
 
         const response = await request(app)
-            .delete('/api/pharmacy/drugs/507f1f77bcf86cd799439011')
+            .delete('/api/v1/pharmacy/drugs/507f1f77bcf86cd799439011')
             .set('Authorization', `Bearer ${token}`);
 
         expect(response.statusCode).toBe(403);
@@ -61,7 +61,7 @@ describe('Pharmacy routes auth and role checks', () => {
 
     it('rejects invalid JWT token for pharmacy endpoint', async () => {
         const response = await request(app)
-            .post('/api/pharmacy/dispense')
+            .post('/api/v1/pharmacy/dispense')
             .set('Authorization', 'Bearer invalid.token.value')
             .send({});
 
@@ -78,7 +78,7 @@ describe('Pharmacy routes auth and role checks', () => {
         });
 
         const response = await request(app)
-            .delete('/api/pharmacy/drugs/507f1f77bcf86cd799439011')
+            .delete('/api/v1/pharmacy/drugs/507f1f77bcf86cd799439011')
             .set('Authorization', `Bearer ${token}`);
 
         expect(response.statusCode).toBe(400);

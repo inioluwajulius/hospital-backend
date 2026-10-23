@@ -17,14 +17,14 @@ describe('API smoke checks', () => {
     }, 20000);
 
     it('requires auth for medical records endpoint', async () => {
-        const response = await request(app).get('/api/medical-records/patient/507f1f77bcf86cd799439011');
+        const response = await request(app).get('/api/v1/medical-records/patient/507f1f77bcf86cd799439011');
 
         expect(response.statusCode).toBe(401);
         expect(response.body).toEqual({ message: 'Not authorized, token missing' });
     });
 
     it('requires auth for audit logs endpoint', async () => {
-        const response = await request(app).get('/api/audit-logs');
+        const response = await request(app).get('/api/v1/audit-logs');
 
         expect(response.statusCode).toBe(401);
         expect(response.body).toEqual({ message: 'Not authorized, token missing' });
