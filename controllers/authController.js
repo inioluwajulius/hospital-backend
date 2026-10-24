@@ -8,6 +8,8 @@ const Notification = require("../models/Notification");
 const socketService = require("../socket");
 const crypto = require("crypto");
 const sendEmail = require("../utils/email");
+const otp = require("../utils/otp");
+const { verificationCodeEmail, passwordResetCodeEmail, passwordChangedEmail } = require("../utils/emailTemplates");
 
 const PASSWORD_REQUIREMENTS_MESSAGE = 'Password must be at least 8 characters and include uppercase, lowercase, number, and special character';
 
@@ -80,16 +82,41 @@ const generatePatientCard = () => {
 };
 
 
-const sendVerificationEmail = async (user, token) => {
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-    const verifyUrl = `${frontendUrl}/auth/verify-email/${token}`;
-    const message = `Please verify your email by clicking on the link: \n\n ${verifyUrl}`;
-    try {
-        await sendEmail({ email: user.email, subject: 'Email Verification - MediCare System', message });
-    } catch (error) {
-        console.error('Error sending verification email', error);
-    }
+// New accounts must verify their email only when email delivery is configured,
+// so development setups without SMTP (and all pre-existing accounts) aren't locked out.
+const isVerificationRequired = () => Boolean(sendEmail.isEmailConfigured && sendEmail.isEmailConfigured());
+
+const sendVerificationCode = async (user) => {
+    const result = await otp.issueCode(user.email, 'email_verification');
+    if (!result.issued) return false;
+    const mail = verificationCodeEmail({ name: user.name, code: result.code, expiresInMinutes: result.expiresInMinutes });
+    await sendEmail({ email: user.email, subject: mail.subject, message: mail.text, html: mail.html });
+    return true;
 };
+
+/** Start email verification for a newly registered user; returns fields for the API response. */
+const startEmailVerification = async (user) => {
+    if (!user.emailVerificationRequired) {
+        return { requiresEmailVerification: false };
+    }
+    try {
+        await sendVerificationCode(user);
+    } catch (error) {
+        // The account exists; the user can request a new code from the verification page
+        console.error('Could not send verification code:', error.message);
+    }
+    return { requiresEmailVerification: true, email: user.email };
+};
+
+const CODE_ERROR_MESSAGES = {
+    invalid: "That code is incorrect. Use the code from the most recent email (a new code replaces older ones), or request a new one.",
+    expired: 'This code has expired. Please request a new one.',
+    too_many_attempts: 'Too many incorrect attempts. Please request a new code.',
+};
+// Password reset uses one message for every failure so it doesn't reveal whether an account exists
+const RESET_CODE_ERROR = 'The code is incorrect or has expired. Use the code from the most recent email, or request a new one.';
+const GENERIC_RESEND_MESSAGE = 'If this email needs verification, a new code has been sent.';
+const GENERIC_RESET_REQUEST_MESSAGE = "If an account exists with this email, we've sent a 6-digit password reset code.";
 
 const handleStaffRegistration = async (req, res, { name, normalizedEmail, hashedPassword, verificationToken, emailVerificationToken, emailVerificationExpires, role, effectiveHospitalId, specialization, licenseNumber, yearsOfExperience }) => {
     if (!role || !SELF_REGISTER_STAFF_ROLES.includes(String(role).toUpperCase())) {
@@ -114,6 +141,7 @@ const handleStaffRegistration = async (req, res, { name, normalizedEmail, hashed
         password: hashedPassword,
         emailVerificationToken,
         emailVerificationExpires,
+        emailVerificationRequired: isVerificationRequired(),
         role: role.toLowerCase(),
         status: Status,
         hospitalId: effectiveHospitalId ? new mongoose.Types.ObjectId(effectiveHospitalId) : undefined,
@@ -151,10 +179,11 @@ const handleStaffRegistration = async (req, res, { name, normalizedEmail, hashed
     }
 
     // Tests expect a generic staff registration success message
-    sendVerificationEmail(newUser, verificationToken);
-    return res.status(201).json({ 
+    const verification = await startEmailVerification(newUser);
+    return res.status(201).json({
         message: 'Staff registration successful. Your account will be active once a hospital administrator approves it.',
-        userId: newUser._id
+        userId: newUser._id,
+        ...verification
     });
 };
 
@@ -183,6 +212,7 @@ const handlePatientRegistration = async (req, res, { name, normalizedEmail, hash
             password: hashedPassword,
             emailVerificationToken,
             emailVerificationExpires,
+            emailVerificationRequired: isVerificationRequired(),
             role: 'patient',
             status: 'active', // Patients active immediately
             hospitalId: effectiveHospitalId ? new mongoose.Types.ObjectId(effectiveHospitalId) : undefined,
@@ -198,12 +228,13 @@ const handlePatientRegistration = async (req, res, { name, normalizedEmail, hash
         existing.bloodGroup = existing.bloodGroup || bloodGroup;
         await existing.save();
 
-        sendVerificationEmail(newUser, verificationToken);
+        const verification = await startEmailVerification(newUser);
         return res.status(201).json({
             message: 'Registration successful! You can now access your medical records.',
             userId: newUser._id,
             patientCardNumber: existing.patientCardNumber,
-            status: 'active'
+            status: 'active',
+            ...verification
         });
     }
 
@@ -218,6 +249,7 @@ const handlePatientRegistration = async (req, res, { name, normalizedEmail, hash
         password: hashedPassword,
         emailVerificationToken,
         emailVerificationExpires,
+        emailVerificationRequired: isVerificationRequired(),
         role: 'patient',
         status: 'active', // Patients active immediately
         hospitalId: new mongoose.Types.ObjectId(effectiveHospitalId),
@@ -263,12 +295,13 @@ const handlePatientRegistration = async (req, res, { name, normalizedEmail, hash
         console.error('Notification error:', err);
     }
 
-    sendVerificationEmail(newUser, verificationToken);
+    const verification = await startEmailVerification(newUser);
     return res.status(201).json({
         message: 'Registration successful! You can now access your account.',
         userId: newUser._id,
         patientCardNumber: patientCard,
-        status: 'active'
+        status: 'active',
+        ...verification
     });
 };
 
@@ -408,6 +441,14 @@ exports.login = async (req, res) => {
             }
         }
 
+        if (existingUser.emailVerificationRequired && !existingUser.isEmailVerified) {
+            return res.status(403).json({
+                message: 'Please verify your email address before logging in.',
+                code: 'EMAIL_NOT_VERIFIED',
+                email: existingUser.email,
+            });
+        }
+
         if (existingUser.status === 'pending') {
             return res.status(403).json({ message: 'Your account is awaiting approval by hospital administration.' });
         }
@@ -453,26 +494,137 @@ exports.verifyEmail = async (req, res) => {
 
 exports.forgotPassword = async (req, res) => {
     try {
-        const { email } = req.body;
-        const user = await User.findOne({ email: normalizeEmail(email) });
-        // Same response whether or not the account exists, so emails can't be enumerated
-        if (!user) { return res.status(200).json({ message: 'If an account exists for that email, a reset link has been sent.' }); }
-        const resetToken = crypto.randomBytes(32).toString('hex');
-        user.resetPasswordToken = crypto.createHash('sha256').update(resetToken).digest('hex');
-        user.resetPasswordExpires = Date.now() + 10 * 60 * 1000;
-        await user.save({ validateBeforeSave: false });
-        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-        const resetUrl = `${frontendUrl}/auth/reset-password/${resetToken}`;
-        const message = `Forgot your password? Reset it here: \n\n ${resetUrl}`;
-        try {
-            await sendEmail({ email: user.email, subject: 'Your password reset token', message });
-            res.status(200).json({ message: 'If an account exists for that email, a reset link has been sent.' });
-        } catch (error) {
-            user.resetPasswordToken = undefined; user.resetPasswordExpires = undefined;
-            await user.save({ validateBeforeSave: false });
-            return res.status(500).json({ message: 'There was an error sending the email.' });
+        const email = normalizeEmail(req.body?.email);
+        if (!isValidEmail(email)) {
+            return res.status(400).json({ message: 'Please enter a valid email address' });
         }
-    } catch (error) { res.status(500).json({ message: 'Server error', error: error.message }); }
+
+        // Same response whether or not the account exists, so emails can't be enumerated.
+        // Delivery problems are logged, not reported, for the same reason.
+        const user = await User.findOne({ email }).select('name email');
+        if (user) {
+            try {
+                const result = await otp.issueCode(email, 'password_reset');
+                if (result.issued) {
+                    const mail = passwordResetCodeEmail({ name: user.name, code: result.code, expiresInMinutes: result.expiresInMinutes });
+                    await sendEmail({ email, subject: mail.subject, message: mail.text, html: mail.html });
+                }
+            } catch (error) {
+                console.error('Could not send password reset code:', error.message);
+            }
+        }
+
+        res.status(200).json({ message: GENERIC_RESET_REQUEST_MESSAGE, retryAfterSeconds: otp.RESEND_COOLDOWN_SECONDS });
+    } catch (error) {
+        console.error('Forgot password error:', error.message);
+        res.status(500).json({ message: 'Something went wrong. Please try again.' });
+    }
+};
+
+/** POST /auth/verify-reset-code  { email, code } -> { resetToken } (single use, short-lived) */
+exports.verifyResetCode = async (req, res) => {
+    try {
+        const email = normalizeEmail(req.body?.email);
+        const result = await otp.verifyCode(email, 'password_reset', req.body?.code);
+        if (!result.valid) {
+            return res.status(400).json({ message: RESET_CODE_ERROR, code: 'INVALID_CODE' });
+        }
+
+        const grant = await otp.createResetGrant(email);
+        res.status(200).json({
+            message: 'Code verified. You can now choose a new password.',
+            resetToken: grant.token,
+            expiresInMinutes: grant.expiresInMinutes,
+        });
+    } catch (error) {
+        console.error('Verify reset code error:', error.message);
+        res.status(500).json({ message: 'Something went wrong. Please try again.' });
+    }
+};
+
+/** POST /auth/reset-password  { resetToken, password, confirmPassword } */
+exports.resetPasswordWithCode = async (req, res) => {
+    try {
+        const { resetToken, password, confirmPassword } = req.body || {};
+        if (!isStrongPassword(password)) {
+            return res.status(400).json({ message: PASSWORD_REQUIREMENTS_MESSAGE });
+        }
+        if (confirmPassword !== undefined && confirmPassword !== password) {
+            return res.status(400).json({ message: 'Passwords do not match' });
+        }
+
+        // Atomically consume the grant: it can authorise exactly one password change
+        const email = await otp.consumeResetGrant(resetToken);
+        if (!email) {
+            return res.status(400).json({ message: 'Your reset session is invalid or has expired. Please request a new code.', code: 'INVALID_RESET_SESSION' });
+        }
+
+        // The grant proves ownership of the email, so every account on it gets the new password
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const users = await User.find({ email }).select('name');
+        await User.updateMany(
+            { email },
+            { $set: { password: hashedPassword, isEmailVerified: true }, $unset: { resetPasswordToken: 1, resetPasswordExpires: 1 } }
+        );
+        await otp.clearCodes(email, ['password_reset', 'password_reset_grant']);
+
+        try {
+            const mail = passwordChangedEmail({ name: users[0]?.name });
+            await sendEmail({ email, subject: mail.subject, message: mail.text, html: mail.html });
+        } catch (error) {
+            console.error('Could not send password changed notification:', error.message);
+        }
+
+        res.status(200).json({ message: 'Your password has been reset. You can now log in with your new password.' });
+    } catch (error) {
+        console.error('Reset password error:', error.message);
+        res.status(500).json({ message: 'Something went wrong. Please try again.' });
+    }
+};
+
+/** POST /auth/resend-verification-code  { email } (generic response) */
+exports.resendVerificationCode = async (req, res) => {
+    try {
+        const email = normalizeEmail(req.body?.email);
+        if (!isValidEmail(email)) {
+            return res.status(400).json({ message: 'Please enter a valid email address' });
+        }
+
+        const user = await User.findOne({ email, emailVerificationRequired: true, isEmailVerified: { $ne: true } }).select('name email');
+        if (user) {
+            try {
+                await sendVerificationCode(user);
+            } catch (error) {
+                console.error('Could not resend verification code:', error.message);
+            }
+        }
+
+        res.status(200).json({ message: GENERIC_RESEND_MESSAGE, retryAfterSeconds: otp.RESEND_COOLDOWN_SECONDS });
+    } catch (error) {
+        console.error('Resend verification error:', error.message);
+        res.status(500).json({ message: 'Something went wrong. Please try again.' });
+    }
+};
+
+/** POST /auth/verify-email  { email, code } */
+exports.verifyEmailCode = async (req, res) => {
+    try {
+        const email = normalizeEmail(req.body?.email);
+        const result = await otp.verifyCode(email, 'email_verification', req.body?.code);
+        if (!result.valid) {
+            return res.status(400).json({ message: CODE_ERROR_MESSAGES[result.reason] || CODE_ERROR_MESSAGES.invalid, code: result.reason.toUpperCase() });
+        }
+
+        // The code proves ownership of the email address, which covers every account on it
+        await User.updateMany(
+            { email },
+            { $set: { isEmailVerified: true }, $unset: { emailVerificationToken: 1, emailVerificationExpires: 1 } }
+        );
+        res.status(200).json({ message: 'Your email has been verified. You can now log in.' });
+    } catch (error) {
+        console.error('Verify email error:', error.message);
+        res.status(500).json({ message: 'Something went wrong. Please try again.' });
+    }
 };
 
 exports.resetPassword = async (req, res) => {

@@ -10,6 +10,25 @@ exports.authLimiter = rateLimit({
     legacyHeaders: false, // Disable the `X-RateLimit-*` headers
 });
 
+// Requests that send a one-time code by email (resend verification, forgot password).
+// Per-email cooldowns and hourly caps are enforced separately in utils/otp.js.
+exports.otpSendLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    message: { message: 'Too many code requests from this IP, please try again after 15 minutes' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+// Code submissions. Each code also allows only a few attempts (utils/otp.js).
+exports.otpVerifyLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    message: { message: 'Too many verification attempts from this IP, please try again after 15 minutes' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
 // Stricter rate limiter specifically for account creation
 // Limits each IP to 3 accounts per hour
 exports.accountCreationLimiter = rateLimit({

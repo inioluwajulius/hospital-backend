@@ -3,6 +3,10 @@ jest.mock('../models/Patient');
 jest.mock('../models/Hospital');
 jest.mock('../models/Notification');
 jest.mock('../utils/email', () => jest.fn().mockResolvedValue());
+jest.mock('../utils/otp', () => ({
+    RESEND_COOLDOWN_SECONDS: 60,
+    issueCode: jest.fn().mockResolvedValue({ issued: true, code: '123456', expiresInMinutes: 10 }),
+}));
 jest.mock('bcryptjs');
 jest.mock('jsonwebtoken');
 
@@ -12,6 +16,7 @@ const User = require('../models/User');
 const Patient = require('../models/Patient');
 const Hospital = require('../models/Hospital');
 const sendEmail = require('../utils/email');
+const otp = require('../utils/otp');
 
 const { login, register, forgotPassword, PASSWORD_REQUIREMENTS_MESSAGE } = require('../controllers/authController');
 
@@ -277,17 +282,37 @@ describe('authController', () => {
     describe('forgotPassword', () => {
         it('gives the same response whether or not the email exists', async () => {
             const missingRes = createMockResponse();
-            User.findOne = jest.fn().mockResolvedValue(null);
+            User.findOne = jest.fn().mockReturnValue({ select: jest.fn().mockResolvedValue(null) });
             await forgotPassword({ body: { email: 'nobody@gmail.com' } }, missingRes);
 
             const existingRes = createMockResponse();
-            User.findOne = jest.fn().mockResolvedValue({ email: 'jane@gmail.com', save: jest.fn().mockResolvedValue(true) });
+            User.findOne = jest.fn().mockReturnValue({ select: jest.fn().mockResolvedValue({ name: 'Jane', email: 'jane@gmail.com' }) });
             await forgotPassword({ body: { email: 'jane@gmail.com' } }, existingRes);
 
             expect(missingRes.status).toHaveBeenCalledWith(200);
             expect(existingRes.status).toHaveBeenCalledWith(200);
             expect(missingRes.json.mock.calls[0][0]).toEqual(existingRes.json.mock.calls[0][0]);
+            // Only the real account gets a code
+            expect(otp.issueCode).toHaveBeenCalledTimes(1);
+            expect(otp.issueCode).toHaveBeenCalledWith('jane@gmail.com', 'password_reset');
             expect(sendEmail).toHaveBeenCalledTimes(1);
+            expect(sendEmail.mock.calls[0][0].message).toContain('123456');
+        });
+
+        it('still gives the generic response when email delivery fails', async () => {
+            const res = createMockResponse();
+            User.findOne = jest.fn().mockReturnValue({ select: jest.fn().mockResolvedValue({ name: 'Jane', email: 'jane@gmail.com' }) });
+            sendEmail.mockRejectedValueOnce(new Error('Email delivery failed'));
+
+            await forgotPassword({ body: { email: 'jane@gmail.com' } }, res);
+
+            expect(res.status).toHaveBeenCalledWith(200);
+        });
+
+        it('rejects an invalid email address', async () => {
+            const res = createMockResponse();
+            await forgotPassword({ body: { email: 'not-an-email' } }, res);
+            expect(res.status).toHaveBeenCalledWith(400);
         });
     });
 });
