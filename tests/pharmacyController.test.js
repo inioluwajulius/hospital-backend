@@ -1,9 +1,12 @@
 jest.mock('../models/Drug');
 jest.mock('../models/Dispense');
+jest.mock('../models/Patient');
+jest.mock('../models/Prescription');
 
 const Drug = require('../models/Drug');
 const Dispense = require('../models/Dispense');
-
+const Patient = require('../models/Patient');
+const Prescription = require('../models/Prescription');
 const {
     addDrug,
     getAllDrugs,
@@ -12,6 +15,14 @@ const {
     dispenseDrug
 } = require('../controllers/pharmacyController');
 
+const HOSPITAL_ID = '64b000000000000000000001';
+const DRUG_ID = '507f1f77bcf86cd799439011';
+const PATIENT_ID = '507f1f77bcf86cd799439012';
+const PRESCRIPTION_ID = '507f1f77bcf86cd799439013';
+
+const tenant = { tenantFilter: { hospitalId: HOSPITAL_ID } };
+const pharmacist = { user: { userId: '507f1f77bcf86cd799439014', role: 'pharmacist' } };
+
 function createMockResponse() {
     const res = {};
     res.status = jest.fn().mockReturnValue(res);
@@ -19,115 +30,95 @@ function createMockResponse() {
     return res;
 }
 
+// Model.findOne(...).select(...) resolving to value
+const selectResolving = (value) => jest.fn().mockReturnValue({ select: jest.fn().mockResolvedValue(value) });
+
 describe('pharmacyController', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        Patient.findOne = selectResolving({ _id: PATIENT_ID });
+        Prescription.findOne = selectResolving({ _id: PRESCRIPTION_ID, status: 'pending' });
+        Prescription.updateOne = jest.fn().mockResolvedValue({});
     });
 
-    it('addDrug creates and returns drug', async () => {
-        const req = {
-            body: {
-                name: 'Paracetamol',
-                category: 'Analgesic',
-                manufacturer: 'Acme Pharma',
-                price: 120,
-                stock: 50,
-                expiryDate: '2027-12-31'
-            }
-        };
+    it('addDrug creates the drug in the caller\'s hospital', async () => {
+        const body = { name: 'Paracetamol', category: 'Analgesic', manufacturer: 'Acme Pharma', price: 120, stock: 50, expiryDate: '2027-12-31' };
         const res = createMockResponse();
-
         const savedDrug = { _id: 'drug-1', save: jest.fn().mockResolvedValue() };
         Drug.mockImplementation(() => savedDrug);
 
-        await addDrug(req, res);
+        await addDrug({ ...tenant, body: { ...body, hospitalId: 'other-hospital' } }, res);
 
-        expect(Drug).toHaveBeenCalledWith(req.body);
+        expect(Drug).toHaveBeenCalledWith({ ...body, hospitalId: HOSPITAL_ID });
         expect(savedDrug.save).toHaveBeenCalledTimes(1);
         expect(res.status).toHaveBeenCalledWith(201);
-        expect(res.json).toHaveBeenCalledWith({
-            message: 'Drug added successfully',
-            drug: savedDrug
-        });
+        expect(res.json).toHaveBeenCalledWith({ message: 'Drug added successfully', drug: savedDrug });
     });
 
-    it('getAllDrugs returns only active drugs by default', async () => {
-        const req = { query: {} };
+    it('getAllDrugs returns active drugs for the hospital', async () => {
         const res = createMockResponse();
-
-        const drugs = [{ _id: 'drug-1', isActive: true }];
+        const drugs = [{ _id: 'drug-1' }];
         Drug.find = jest.fn().mockResolvedValue(drugs);
 
-        await getAllDrugs(req, res);
+        await getAllDrugs({ ...tenant, query: {} }, res);
 
-        expect(Drug.find).toHaveBeenCalledWith({ isActive: true });
+        expect(Drug.find).toHaveBeenCalledWith({ hospitalId: HOSPITAL_ID, isActive: true });
         expect(res.status).toHaveBeenCalledWith(200);
         expect(res.json).toHaveBeenCalledWith(drugs);
     });
 
     it('getAllDrugs includes inactive drugs when includeInactive=true', async () => {
-        const req = { query: { includeInactive: 'true' } };
         const res = createMockResponse();
+        Drug.find = jest.fn().mockResolvedValue([]);
 
-        const drugs = [{ _id: 'drug-1', isActive: true }, { _id: 'drug-2', isActive: false }];
-        Drug.find = jest.fn().mockResolvedValue(drugs);
+        await getAllDrugs({ ...tenant, query: { includeInactive: 'true' } }, res);
 
-        await getAllDrugs(req, res);
-
-        expect(Drug.find).toHaveBeenCalledWith();
-        expect(res.status).toHaveBeenCalledWith(200);
-        expect(res.json).toHaveBeenCalledWith(drugs);
+        expect(Drug.find).toHaveBeenCalledWith({ hospitalId: HOSPITAL_ID });
     });
 
-    it('updateStock updates stock for active drug', async () => {
-        const req = {
-            params: { drugId: '507f1f77bcf86cd799439011' },
-            body: { stock: 99 }
-        };
+    it('updateStock updates an active drug in the hospital', async () => {
         const res = createMockResponse();
-
-        const updatedDrug = { _id: req.params.drugId, stock: 99, isActive: true };
+        const updatedDrug = { _id: DRUG_ID, stock: 99, isActive: true };
         Drug.findOneAndUpdate = jest.fn().mockResolvedValue(updatedDrug);
 
-        await updateStock(req, res);
+        await updateStock({ ...tenant, params: { drugId: DRUG_ID }, body: { stock: 99 } }, res);
 
         expect(Drug.findOneAndUpdate).toHaveBeenCalledWith(
-            { _id: req.params.drugId, isActive: true },
+            { _id: DRUG_ID, isActive: true, hospitalId: HOSPITAL_ID },
             { stock: 99 },
             { new: true }
         );
         expect(res.status).toHaveBeenCalledWith(200);
-        expect(res.json).toHaveBeenCalledWith({
-            message: 'Stock updated successfully',
-            drug: updatedDrug
-        });
+        expect(res.json).toHaveBeenCalledWith({ message: 'Stock updated successfully', drug: updatedDrug });
+    });
+
+    it('updateStock rejects negative or non-numeric stock', async () => {
+        for (const stock of [-1, 'abc', 2.5]) {
+            const res = createMockResponse();
+            Drug.findOneAndUpdate = jest.fn();
+            await updateStock({ ...tenant, params: { drugId: DRUG_ID }, body: { stock } }, res);
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(Drug.findOneAndUpdate).not.toHaveBeenCalled();
+        }
     });
 
     it('deleteDrug rejects deleting when stock is greater than zero', async () => {
-        const req = { params: { drugId: '507f1f77bcf86cd799439011' } };
         const res = createMockResponse();
+        Drug.findOne = jest.fn().mockResolvedValue({ _id: DRUG_ID, isActive: true, stock: 5 });
 
-        Drug.findById = jest.fn().mockResolvedValue({ _id: req.params.drugId, isActive: true, stock: 5 });
+        await deleteDrug({ ...tenant, params: { drugId: DRUG_ID } }, res);
 
-        await deleteDrug(req, res);
-
+        expect(Drug.findOne).toHaveBeenCalledWith({ _id: DRUG_ID, hospitalId: HOSPITAL_ID });
         expect(res.status).toHaveBeenCalledWith(400);
         expect(res.json).toHaveBeenCalledWith({ message: 'Cannot delete drug with stock greater than zero' });
     });
 
-    it('deleteDrug soft-deletes active drug with zero stock', async () => {
-        const req = { params: { drugId: '507f1f77bcf86cd799439011' } };
+    it('deleteDrug soft-deletes an active drug with zero stock', async () => {
         const res = createMockResponse();
+        const drug = { _id: DRUG_ID, isActive: true, stock: 0, save: jest.fn().mockResolvedValue() };
+        Drug.findOne = jest.fn().mockResolvedValue(drug);
 
-        const drug = {
-            _id: req.params.drugId,
-            isActive: true,
-            stock: 0,
-            save: jest.fn().mockResolvedValue()
-        };
-        Drug.findById = jest.fn().mockResolvedValue(drug);
-
-        await deleteDrug(req, res);
+        await deleteDrug({ ...tenant, params: { drugId: DRUG_ID } }, res);
 
         expect(drug.isActive).toBe(false);
         expect(drug.deletedAt).toBeInstanceOf(Date);
@@ -136,63 +127,55 @@ describe('pharmacyController', () => {
         expect(res.json).toHaveBeenCalledWith({ message: 'Drug deleted successfully' });
     });
 
-    it('dispenseDrug atomically decrements stock and creates dispense record', async () => {
+    it('deleteDrug returns 404 for a drug in another hospital', async () => {
+        const res = createMockResponse();
+        Drug.findOne = jest.fn().mockResolvedValue(null);
+
+        await deleteDrug({ ...tenant, params: { drugId: DRUG_ID } }, res);
+
+        expect(res.status).toHaveBeenCalledWith(404);
+    });
+
+    it('dispenseDrug atomically decrements stock, records the dispense and marks the prescription dispensed', async () => {
         const req = {
-            user: { userId: '507f1f77bcf86cd799439014', role: 'pharmacist' },
-            body: {
-                patientId: '507f1f77bcf86cd799439012',
-                prescriptionId: '507f1f77bcf86cd799439013',
-                drugId: '507f1f77bcf86cd799439011',
-                quantity: 2,
-                pharmacistId: 'ignored-body-value'
-            }
+            ...tenant,
+            ...pharmacist,
+            body: { patientId: PATIENT_ID, prescriptionId: PRESCRIPTION_ID, drugId: DRUG_ID, quantity: 2, pharmacistId: 'ignored-body-value' }
         };
         const res = createMockResponse();
-
-        Drug.findOneAndUpdate = jest.fn().mockResolvedValue({ _id: req.body.drugId, stock: 8 });
-
+        Drug.findOneAndUpdate = jest.fn().mockResolvedValue({ _id: DRUG_ID, stock: 8 });
         const newDispense = { _id: 'dispense-1', save: jest.fn().mockResolvedValue() };
         Dispense.mockImplementation(() => newDispense);
 
         await dispenseDrug(req, res);
 
-        // Stock check and decrement happen in a single conditional update
+        expect(Patient.findOne).toHaveBeenCalledWith({ _id: PATIENT_ID, hospitalId: HOSPITAL_ID });
         expect(Drug.findOneAndUpdate).toHaveBeenCalledWith(
-            { _id: req.body.drugId, isActive: true, stock: { $gte: 2 } },
+            { _id: DRUG_ID, isActive: true, stock: { $gte: 2 }, hospitalId: HOSPITAL_ID },
             { $inc: { stock: -2 } },
             { new: true }
         );
         // Pharmacist comes from the token, not the request body
         expect(Dispense).toHaveBeenCalledWith({
-            patientId: req.body.patientId,
-            prescriptionId: req.body.prescriptionId,
-            drugId: req.body.drugId,
+            patientId: PATIENT_ID,
+            prescriptionId: PRESCRIPTION_ID,
+            drugId: DRUG_ID,
             quantity: 2,
-            pharmacistId: req.user.userId
+            pharmacistId: pharmacist.user.userId,
+            hospitalId: HOSPITAL_ID
         });
         expect(newDispense.save).toHaveBeenCalledTimes(1);
+        expect(Prescription.updateOne).toHaveBeenCalledWith({ _id: PRESCRIPTION_ID, hospitalId: HOSPITAL_ID }, { status: 'dispensed' });
         expect(res.status).toHaveBeenCalledWith(201);
-        expect(res.json).toHaveBeenCalledWith({
-            message: 'Drug dispensed successfully',
-            dispense: newDispense
-        });
+        expect(res.json).toHaveBeenCalledWith({ message: 'Drug dispensed successfully', dispense: newDispense });
     });
 
     it('dispenseDrug rejects when stock is insufficient', async () => {
-        const req = {
-            user: { userId: 'pharm-1', role: 'pharmacist' },
-            body: {
-                drugId: '507f1f77bcf86cd799439011',
-                quantity: 20
-            }
-        };
         const res = createMockResponse();
-
-        // Conditional update matches nothing, but the drug exists
         Drug.findOneAndUpdate = jest.fn().mockResolvedValue(null);
-        Drug.findOne = jest.fn().mockReturnValue({ select: jest.fn().mockResolvedValue({ _id: req.body.drugId }) });
+        Drug.findOne = selectResolving({ _id: DRUG_ID });
 
-        await dispenseDrug(req, res);
+        await dispenseDrug({ ...tenant, ...pharmacist, body: { patientId: PATIENT_ID, drugId: DRUG_ID, quantity: 20 } }, res);
 
         expect(res.status).toHaveBeenCalledWith(400);
         expect(res.json).toHaveBeenCalledWith({ message: 'Insufficient stock' });
@@ -203,10 +186,33 @@ describe('pharmacyController', () => {
             const res = createMockResponse();
             Drug.findOneAndUpdate = jest.fn();
 
-            await dispenseDrug({ user: { userId: 'pharm-1' }, body: { drugId: 'drug-1', quantity } }, res);
+            await dispenseDrug({ ...tenant, ...pharmacist, body: { patientId: PATIENT_ID, drugId: DRUG_ID, quantity } }, res);
 
             expect(res.status).toHaveBeenCalledWith(400);
             expect(Drug.findOneAndUpdate).not.toHaveBeenCalled();
         }
+    });
+
+    it('dispenseDrug rejects a patient from another hospital', async () => {
+        const res = createMockResponse();
+        Patient.findOne = selectResolving(null);
+        Drug.findOneAndUpdate = jest.fn();
+
+        await dispenseDrug({ ...tenant, ...pharmacist, body: { patientId: PATIENT_ID, drugId: DRUG_ID, quantity: 1 } }, res);
+
+        expect(res.status).toHaveBeenCalledWith(400);
+        expect(Drug.findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('dispenseDrug refuses an already-dispensed prescription', async () => {
+        const res = createMockResponse();
+        Prescription.findOne = selectResolving({ _id: PRESCRIPTION_ID, status: 'dispensed' });
+        Drug.findOneAndUpdate = jest.fn();
+
+        await dispenseDrug({ ...tenant, ...pharmacist, body: { patientId: PATIENT_ID, prescriptionId: PRESCRIPTION_ID, drugId: DRUG_ID, quantity: 1 } }, res);
+
+        expect(res.status).toHaveBeenCalledWith(400);
+        expect(res.json).toHaveBeenCalledWith({ message: 'Prescription has already been dispensed' });
+        expect(Drug.findOneAndUpdate).not.toHaveBeenCalled();
     });
 });

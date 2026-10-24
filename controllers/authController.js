@@ -425,7 +425,7 @@ exports.login = async (req, res) => {
             userId: existingUser._id,
             email: existingUser.email,
             role: existingUser.role,
-            hospitalId: existingUser.hospitalId,
+            hospitalId: existingUser.hospitalId?._id || existingUser.hospitalId || null,
             isSuperAdmin: existingUser.isSuperAdmin || false,
         }, process.env.JWT_SECRET, { expiresIn: '1d' });
 
