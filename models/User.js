@@ -21,6 +21,12 @@ const userSchema = new mongoose.Schema({
         type: Boolean,
         default: false,
     },
+    // Set for accounts registered while email delivery is configured; login is blocked
+    // until they verify. Older accounts don't have it, so they aren't locked out.
+    emailVerificationRequired: {
+        type: Boolean,
+        default: false,
+    },
     emailVerificationToken: {
         type: String,
         select: false,

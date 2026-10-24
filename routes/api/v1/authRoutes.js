@@ -1,10 +1,13 @@
 const express = require('express');
 const router = express.Router();
 
-const { register, login, verifyEmail, forgotPassword, resetPassword } = require('../../../controllers/authController');
+const {
+    register, login, verifyEmail, forgotPassword, resetPassword,
+    verifyEmailCode, resendVerificationCode, verifyResetCode, resetPasswordWithCode,
+} = require('../../../controllers/authController');
 const authMiddleware = require('../../../middleware/authMiddleware');
 const User = require('../../../models/User');
-const { authLimiter, accountCreationLimiter } = require('../../../middleware/rateLimiter');
+const { authLimiter, accountCreationLimiter, otpSendLimiter, otpVerifyLimiter } = require('../../../middleware/rateLimiter');
 
 /**
  * @route   POST /api/v1/auth/register
@@ -28,11 +31,40 @@ router.post('/login', authLimiter, login);
 router.get('/verify-email/:token', verifyEmail);
 
 /**
+ * @route   POST /api/v1/auth/verify-email
+ * @desc    Verify an email address with the 6-digit code sent at registration
+ * @access  Public
+ */
+router.post('/verify-email', otpVerifyLimiter, verifyEmailCode);
+
+/**
+ * @route   POST /api/v1/auth/resend-verification-code
+ * @desc    Send a new verification code (generic response; per-email cooldown applies)
+ * @access  Public
+ */
+router.post('/resend-verification-code', otpSendLimiter, resendVerificationCode);
+router.post('/send-verification-code', otpSendLimiter, resendVerificationCode);
+
+/**
  * @route   POST /api/v1/auth/forgot-password
  * @desc    Forgot password email
  * @access  Public
  */
-router.post('/forgot-password', authLimiter, forgotPassword);
+router.post('/forgot-password', otpSendLimiter, forgotPassword);
+
+/**
+ * @route   POST /api/v1/auth/verify-reset-code
+ * @desc    Exchange a valid reset code for a short-lived, single-use reset token
+ * @access  Public
+ */
+router.post('/verify-reset-code', otpVerifyLimiter, verifyResetCode);
+
+/**
+ * @route   POST /api/v1/auth/reset-password
+ * @desc    Set a new password using the reset token from verify-reset-code
+ * @access  Public
+ */
+router.post('/reset-password', authLimiter, resetPasswordWithCode);
 
 /**
  * @route   POST /api/v1/auth/reset-password/:token

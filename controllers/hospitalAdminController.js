@@ -235,6 +235,8 @@ exports.acceptInvitation = async (req, res) => {
         const bcryptjs = require('bcryptjs');
         user.password = await bcryptjs.hash(password, 10);
         user.status = 'active';
+        // The invitation link was delivered to this inbox, which proves ownership
+        user.isEmailVerified = true;
         user.invitationToken = undefined;
         user.invitationExpires = undefined;
 
