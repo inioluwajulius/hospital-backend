@@ -7,6 +7,7 @@ const {
 } = require('../../../controllers/authController');
 const authMiddleware = require('../../../middleware/authMiddleware');
 const User = require('../../../models/User');
+const { updateMe, changePassword, changeEmail } = require('../../../controllers/accountController');
 const { authLimiter, accountCreationLimiter, otpSendLimiter, otpVerifyLimiter } = require('../../../middleware/rateLimiter');
 
 /**
@@ -78,10 +79,14 @@ router.post('/reset-password/:token', authLimiter, resetPassword);
  * @desc    Get current authenticated user info
  * @access  Private
  */
+router.put('/me', authMiddleware, updateMe);
+router.post('/change-password', authMiddleware, authLimiter, changePassword);
+router.post('/change-email', authMiddleware, authLimiter, changeEmail);
+
 router.get('/me', authMiddleware, async (req, res) => {
     try {
         // The token only carries id/role, so load name and email from the database
-        const user = await User.findById(req.user.userId).select('name email role status hospitalId');
+        const user = await User.findById(req.user.userId).select('name email phone role status hospitalId isEmailVerified mustChangePassword');
         if (!user) {
             return res.status(404).json({ message: 'User not found' });
         }
@@ -91,7 +96,10 @@ router.get('/me', authMiddleware, async (req, res) => {
             email: user.email,
             role: user.role,
             status: user.status,
-            hospitalId: user.hospitalId
+            hospitalId: user.hospitalId,
+            phone: user.phone,
+            isEmailVerified: user.isEmailVerified,
+            mustChangePassword: user.mustChangePassword
         });
     } catch (error) {
         res.status(500).json({ message: 'Error retrieving user info', error: error.message });

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const superAdminController = require('../../../controllers/superAdminController');
+const { superAdmin: accounts } = require('../../../controllers/accountController');
 const authMiddleware = require('../../../middleware/authMiddleware');
 
 /**
@@ -30,6 +31,13 @@ router.get('/hospitals/:hospitalId', superAdminController.getHospital);
 router.put('/hospitals/:hospitalId', superAdminController.updateHospital);
 router.patch('/hospitals/:hospitalId/status', superAdminController.updateHospitalStatus);
 router.patch('/hospitals/:hospitalId/features', superAdminController.updateHospitalFeatures);
-router.get('/hospitals/:hospitalId/stats', superAdminController.getHospitalStats);
+router.get('/hospitals/:hospitalId/stats', accounts.stats);
+
+// Users of a hospital (accounts only; no passwords are ever returned)
+router.get('/hospitals/:hospitalId/users', accounts.list);
+router.get('/hospitals/:hospitalId/users/:userId', accounts.get);
+router.patch('/hospitals/:hospitalId/users/:userId', accounts.update);
+router.post('/hospitals/:hospitalId/users/:userId/reset-password', accounts.resetPassword);
+router.post('/hospitals/:hospitalId/users/:userId/resend-verification', accounts.resendVerification);
 
 module.exports = router;

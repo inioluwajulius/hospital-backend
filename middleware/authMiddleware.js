@@ -26,6 +26,14 @@ const authMiddleware = (req, res, next) => {
 			isSuperAdmin: decoded.isSuperAdmin,
 			hospitalId: tokenHospitalId(decoded)
 		};
+		// After an admin-issued temporary password, only the password change is allowed
+		if (decoded.mustChangePassword) {
+			const path = (req.originalUrl || '').split('?')[0];
+			const allowed = path.endsWith('/auth/change-password') || (req.method === 'GET' && path.endsWith('/auth/me'));
+			if (!allowed) {
+				return res.status(403).json({ message: 'Please choose a new password to continue.', code: 'PASSWORD_CHANGE_REQUIRED' });
+			}
+		}
 		next();
 	} catch (error) {
 		if (error.name === 'TokenExpiredError') {

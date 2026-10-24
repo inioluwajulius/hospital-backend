@@ -21,6 +21,12 @@ const userSchema = new mongoose.Schema({
         type: Boolean,
         default: false,
     },
+    // Set after an admin issues a temporary password; the user must choose a new one
+    mustChangePassword: {
+        type: Boolean,
+        default: false,
+    },
+    lastLoginAt: Date,
     // Set for accounts registered while email delivery is configured; login is blocked
     // until they verify. Older accounts don't have it, so they aren't locked out.
     emailVerificationRequired: {
@@ -137,6 +143,14 @@ const userSchema = new mongoose.Schema({
     phone: String,
     avatar: String,
     department: String,
+
+    // Doctors' weekly consulting hours (clinic local time). Empty = no restriction.
+    availability: [{
+        _id: false,
+        day: { type: Number, min: 0, max: 6, required: true }, // 0 = Sunday
+        start: { type: String, match: /^([01]\d|2[0-3]):[0-5]\d$/, required: true },
+        end: { type: String, match: /^([01]\d|2[0-3]):[0-5]\d$/, required: true },
+    }],
     
 }, { timestamps: true });
 

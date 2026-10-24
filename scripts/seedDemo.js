@@ -28,6 +28,7 @@ const Billing = require('../models/Billing');
 const Drug = require('../models/Drug');
 const Dispense = require('../models/Dispense');
 const Notification = require('../models/Notification');
+const ConsultationMessage = require('../models/ConsultationMessage');
 
 const SLUG = 'medicare-demo';
 const DOMAIN = 'medicare-demo.com';
@@ -43,7 +44,9 @@ const daysFromNow = (days, hour = 10) => {
 
 const STAFF = [
     { role: 'hospital_admin', name: 'Grace Okafor', email: `admin@${DOMAIN}` },
-    { role: 'doctor', name: 'Dr. Tunde Adeyemi', email: `doctor@${DOMAIN}`, specialization: 'General Medicine', licenseNumber: 'MDCN-48213', yearsOfExperience: 9, department: 'Outpatients' },
+    { role: 'doctor', name: 'Dr. Tunde Adeyemi', email: `doctor@${DOMAIN}`, specialization: 'General Medicine', licenseNumber: 'MDCN-48213', yearsOfExperience: 9, department: 'Outpatients',
+      // Mon-Fri 08:00-18:00, Sat 09:00-13:00 (clinic time)
+      availability: [1, 2, 3, 4, 5].map((day) => ({ day, start: '08:00', end: '18:00' })).concat([{ day: 6, start: '09:00', end: '13:00' }]) },
     { role: 'nurse', name: 'Blessing Eze', email: `nurse@${DOMAIN}`, department: 'Outpatients' },
     { role: 'receptionist', name: 'Musa Ibrahim', email: `reception@${DOMAIN}`, department: 'Front Desk' },
     { role: 'lab_technician', name: 'Chioma Nwosu', email: `lab@${DOMAIN}`, department: 'Laboratory' },
@@ -67,6 +70,7 @@ const deleteDemoData = async (hospitalId) => {
         Drug.deleteMany(byHospital),
         Dispense.deleteMany(byHospital),
         Notification.deleteMany(byHospital),
+        ConsultationMessage.deleteMany(byHospital),
         HospitalAdmin.deleteMany(byHospital),
     ]);
     await Patient.deleteMany(byHospital);
@@ -159,6 +163,8 @@ const deleteDemoData = async (hospitalId) => {
         // Today's work in progress, one item waiting at each desk
         await Appointment.create({ patientId: patient._id, doctorId: doctor._id, hospitalId, appointmentDate: daysFromNow(0, 11), reason: 'Follow-up: cough not resolved', status: 'scheduled' });
         await Appointment.create({ patientId: walkIn._id, doctorId: doctor._id, hospitalId, appointmentDate: daysFromNow(1, 14), reason: 'Blood pressure check', status: 'scheduled', isUrgent: true });
+        // Telemedicine: a remote follow-up today, ready to open from /telemedicine
+        await Appointment.create({ patientId: patient._id, doctorId: doctor._id, hospitalId, appointmentDate: daysFromNow(0, 15), reason: 'Video follow-up: review blood test results', status: 'scheduled', mode: 'telemedicine' });
         await LabTest.create({ patientId: patient._id, hospitalId, doctorId: doctor._id, testName: 'Full Blood Count', category: 'Blood', priority: 'Urgent', status: 'Pending' });
         await LabTest.create({ patientId: walkIn._id, hospitalId, doctorId: doctor._id, testName: 'Fasting Blood Sugar', category: 'Biochemistry', priority: 'Normal', status: 'Pending' });
         await Radiology.create({ patientId: patient._id, hospitalId, doctorId: doctor._id, examOrder: `RAD-DEMO-${Date.now()}`, examType: 'xray', bodyPart: 'Chest', priority: 'urgent', status: 'ordered' });
@@ -186,6 +192,7 @@ const deleteDemoData = async (hospitalId) => {
         console.log('Staff and admin log in at /auth/login/doctor; the patient at /auth/login/patient:');
         for (const spec of STAFF) console.log(`  ${spec.role.padEnd(15)} ${spec.email}`);
         console.log(`  ${'patient'.padEnd(15)} patient@${DOMAIN}`);
+        console.log('\nTelemedicine demo: log in as doctor and as patient (two browsers), open Telemedicine, then the consultation room.');
         console.log('\nWalk-in record to claim online (Register > Patient > "I have an existing record"):');
         console.log('  Hospital: MediCare Demo Hospital   Card: PAT-200002   Phone: 08055556666');
     } finally {
