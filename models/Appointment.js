@@ -31,6 +31,15 @@ const appointmentSchema = new mongoose.Schema({
         default: false
     },
 
+    // Telemedicine appointments take place in the online consultation room
+    mode: {
+        type: String,
+        enum: ['in-person', 'telemedicine'],
+        default: 'in-person'
+    },
+    startedAt: Date,
+    endedAt: Date,
+
     status: {
         type: String,
         enum: ['scheduled', 'in-progress', 'completed', 'cancelled'],

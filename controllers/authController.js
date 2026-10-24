@@ -468,9 +468,12 @@ exports.login = async (req, res) => {
             role: existingUser.role,
             hospitalId: existingUser.hospitalId?._id || existingUser.hospitalId || null,
             isSuperAdmin: existingUser.isSuperAdmin || false,
+            ...(existingUser.mustChangePassword ? { mustChangePassword: true } : {}),
         }, process.env.JWT_SECRET, { expiresIn: '1d' });
 
-        res.json({ token, user: buildSafeUser(existingUser) });
+        // Best effort: a failure to record the login time must never block the login
+        Promise.resolve().then(() => User.updateOne({ _id: existingUser._id }, { $set: { lastLoginAt: new Date() } })).catch(() => {});
+        res.json({ token, user: buildSafeUser(existingUser), ...(existingUser.mustChangePassword ? { mustChangePassword: true } : {}) });
     } catch (error) {
         res.status(500).json({ message: 'Server error', error: error.message });
     }

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const hospitalAdminController = require('../../../controllers/hospitalAdminController');
+const { hospitalAdmin: accounts } = require('../../../controllers/accountController');
 const authMiddleware = require('../../../middleware/authMiddleware');
 const authorize = require('../../../middleware/roleMiddleware');
 const { requireTenant, authorizeTenant } = require('../../../middleware/tenantMiddleware');
@@ -24,7 +25,12 @@ router.get('/profile', hospitalAdminController.getHospitalProfile);
 router.put('/profile', hospitalAdminController.updateHospitalProfile);
 
 // Staff Management
-router.get('/staff', hospitalAdminController.getAllStaff);
+router.get('/stats', accounts.stats);
+router.get('/staff', accounts.list);
+router.get('/staff/:userId', accounts.get);
+router.patch('/staff/:userId', accounts.update);
+router.post('/staff/:userId/reset-password', accounts.resetPassword);
+router.post('/staff/:userId/resend-verification', accounts.resendVerification);
 router.post('/staff/invite', hospitalAdminController.inviteStaffMember);
 router.post('/staff/:userId/resend-invitation', hospitalAdminController.resendInvitation);
 

@@ -103,6 +103,8 @@ app.use('/api/v1/notifications', notificationRoutes);
 
 // Migrated API v1 Routes
 app.use('/api/v1/appointments', appointmentRoutes);
+app.use('/api/v1/consultations', require('./routes/api/v1/consultationRoutes'));
+app.use('/api/v1/messages', require('./routes/api/v1/messageRoutes'));
 app.use('/api/v1/prescriptions', prescriptionRoutes);
 app.use('/api/v1/lab', labRoutes);
 app.use('/api/v1/radiology', radiologyRoutes);

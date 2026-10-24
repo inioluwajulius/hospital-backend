@@ -4,7 +4,7 @@ const router = express.Router();
 const authMiddleware = require('../../../middleware/authMiddleware');
 const authorize = require('../../../middleware/roleMiddleware');
 
-const { createDoctor, getDoctors, updateDoctor, deleteDoctor } = require('../../../controllers/doctorController');
+const { createDoctor, getDoctors, updateDoctor, deleteDoctor, updateMyAvailability } = require('../../../controllers/doctorController');
 
 /**
  * @route   GET /api/v1/doctors
@@ -25,6 +25,13 @@ router.post('/', authMiddleware, authorize('admin'), createDoctor);
  * @desc    Update doctor information (audit tracked)
  * @access  Private - Admin only
  */
+/**
+ * @route   PUT /api/v1/doctors/me/availability
+ * @desc    Doctor sets their weekly consulting hours
+ * @access  Private - Doctor
+ */
+router.put('/me/availability', authMiddleware, authorize('doctor'), updateMyAvailability);
+
 router.put('/:id', authMiddleware, authorize('admin'), updateDoctor);
 
 /**

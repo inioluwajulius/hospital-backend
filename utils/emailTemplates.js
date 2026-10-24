@@ -134,14 +134,17 @@ const verificationCodeEmail = ({ name, code, expiresInMinutes }) => {
 };
 
 /** B. Password reset code */
-const passwordResetCodeEmail = ({ name, code, expiresInMinutes }) => {
+const passwordResetCodeEmail = ({ name, code, expiresInMinutes, initiatedByAdmin = false }) => {
+    const intro = initiatedByAdmin
+        ? 'An administrator at your hospital started a password reset for your account. Open "Forgot your password?" on the login page, enter your email, then this code:'
+        : 'We received a request to reset the password for your account. Enter this code to continue:';
     const subject = `Your Password Reset Code — ${APP_NAME}`;
     const html = layout({
         preheader: `Your ${APP_NAME} password reset code is ${code}`,
         heading: 'Reset your password',
         bodyHtml:
             paragraph(`Hi ${escapeHtml(firstName(name))},`) +
-            paragraph('We received a request to reset the password for your account. Enter this code to continue:') +
+            paragraph(escapeHtml(intro).replace(/&quot;/g, '"')) +
             codeBlock(code) +
             paragraph(`The code expires in <strong>${escapeHtml(expiresInMinutes)} minutes</strong> and can only be used once.`) +
             notice(`<strong style="color:${BRAND.body};">Didn't request this?</strong> Ignore this email and your password will stay the same. Never share this code with anyone.`),
@@ -149,7 +152,7 @@ const passwordResetCodeEmail = ({ name, code, expiresInMinutes }) => {
     const text = [
         `Hi ${firstName(name)},`,
         '',
-        'We received a request to reset your password. Your reset code is:',
+        intro,
         '',
         `    ${code}`,
         '',

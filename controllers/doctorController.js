@@ -83,6 +83,35 @@ exports.getDoctors = async (req, res) => {
     }
 };
 
+/** PUT /doctors/me/availability  { availability: [{ day: 0-6, start: 'HH:mm', end: 'HH:mm' }] } */
+exports.updateMyAvailability = async (req, res) => {
+    try {
+        const input = req.body?.availability;
+        if (!Array.isArray(input) || input.length > 21) {
+            return res.status(400).json({ message: 'availability must be a list of up to 21 time slots' });
+        }
+        const timeRe = /^([01]\d|2[0-3]):[0-5]\d$/;
+        const availability = [];
+        for (const slot of input) {
+            const day = Number(slot?.day);
+            if (!Number.isInteger(day) || day < 0 || day > 6 || !timeRe.test(slot?.start) || !timeRe.test(slot?.end) || slot.start >= slot.end) {
+                return res.status(400).json({ message: 'Each slot needs a day (0-6) and a start time before its end time (HH:mm)' });
+            }
+            availability.push({ day, start: slot.start, end: slot.end });
+        }
+
+        const doctor = await User.findOneAndUpdate(
+            { _id: req.user.userId, role: 'doctor' },
+            { $set: { availability } },
+            { new: true, runValidators: true }
+        ).select('availability');
+        if (!doctor) return res.status(404).json({ message: 'Doctor not found' });
+        res.json({ success: true, data: doctor.availability });
+    } catch (error) {
+        res.status(400).json({ message: error.message });
+    }
+};
+
 exports.updateDoctor = async (req, res) => {
     try {
         const query = { _id: req.params.id, role: 'doctor' };

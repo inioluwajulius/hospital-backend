@@ -27,7 +27,7 @@ const sendInvitationEmail = ({ email, name, role, invitationToken }) => {
 // Get hospital profile
 exports.getHospitalProfile = async (req, res) => {
     try {
-        const hospitalId = req.tenant?.hospital?._id;
+        const hospitalId = req.tenant?.id;
 
         if (!hospitalId) {
             return res.status(400).json({ error: 'Hospital context required' });
@@ -51,32 +51,34 @@ exports.getHospitalProfile = async (req, res) => {
 // Update hospital profile
 exports.updateHospitalProfile = async (req, res) => {
     try {
-        const hospitalId = req.tenant?.hospital?._id;
-        const { name, description, logo, address, contact, branding, settings } = req.body;
-
-        // Only hospital admin can update
-        const isAdmin = await HospitalAdmin.findOne({
-            hospitalId,
-            userId: req.user._id,
-            status: 'active',
-        });
-
-        if (!isAdmin && !req.user.isSuperAdmin) {
-            return res.status(403).json({ error: 'Unauthorized' });
+        // Hospital comes from the admin's signed token; the route requires the hospital_admin role
+        const hospitalId = req.tenant?.id;
+        if (!hospitalId) {
+            return res.status(400).json({ error: 'Hospital context required' });
+        }
+        const body = req.body || {};
+        const str = (v, max = 300) => (typeof v === 'string' ? v.trim().slice(0, max) : undefined);
+        const changes = {};
+        if (body.description !== undefined) changes.description = str(body.description, 1000);
+        if (body.logo !== undefined) changes.logo = str(body.logo, 500);
+        for (const key of ['street', 'city', 'state', 'zipCode', 'country']) {
+            if (body.address?.[key] !== undefined) changes[`address.${key}`] = str(body.address[key], 120);
+        }
+        for (const key of ['phone', 'email', 'website']) {
+            if (body.contact?.[key] !== undefined) changes[`contact.${key}`] = str(body.contact[key], 200);
+        }
+        if (changes['contact.email'] && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(changes['contact.email'])) {
+            return res.status(400).json({ error: 'Enter a valid contact email' });
+        }
+        // The hospital's name is part of its verified identity: only the super admin changes it
+        if (body.name !== undefined && body.name !== req.tenant?.hospital?.name && !req.user.isSuperAdmin) {
+            return res.status(403).json({ error: 'The hospital name can only be changed by the platform administrator' });
         }
 
         const hospital = await Hospital.findByIdAndUpdate(
             hospitalId,
-            {
-                name,
-                description,
-                logo,
-                address,
-                contact,
-                branding: branding || undefined,
-                settings: settings || undefined,
-            },
-            { new: true }
+            { $set: { ...changes, updatedAt: new Date() } },
+            { new: true, runValidators: true }
         );
 
         res.json({

@@ -3,8 +3,9 @@ const Notification = require('../models/Notification');
 const socketService = require('../socket');
 const Patient = require('../models/Patient');
 const User = require('../models/User');
+const { checkSlot } = require('../utils/scheduling');
 
-const APPOINTMENT_FIELDS = ['patientId', 'doctorId', 'appointmentDate', 'reason', 'isUrgent', 'status'];
+const APPOINTMENT_FIELDS = ['patientId', 'doctorId', 'appointmentDate', 'reason', 'isUrgent', 'status', 'mode'];
 
 const pick = (body = {}, fields) => {
     const out = {};
@@ -59,6 +60,14 @@ exports.createAppointment = async (req, res) => {
             return res.status(400).json({ success: false, message: referenceError });
         }
 
+        if (!appointmentData.doctorId) {
+            return res.status(400).json({ success: false, message: 'Please choose a doctor' });
+        }
+        const slotError = await checkSlot(appointmentData);
+        if (slotError) {
+            return res.status(409).json({ success: false, message: slotError });
+        }
+
         const appointment = new Appointment(appointmentData);
         await appointment.save();
 
@@ -68,12 +77,13 @@ exports.createAppointment = async (req, res) => {
                 const doctorRecord = await User.findById(appointment.doctorId);
                 
                 if (doctorRecord && doctorRecord.role === 'doctor') {
+                    const isRemote = appointment.mode === 'telemedicine';
                     const notif = await Notification.create({
                         recipient: doctorRecord._id,
                         hospitalId: req.tenantFilter?.hospitalId || appointment.hospitalId,
                         type: 'APPOINTMENT',
-                        message: `New appointment scheduled for ${new Date(appointment.appointmentDate).toLocaleDateString()}`,
-                        link: '/doctor/appointments'
+                        message: `New ${isRemote ? 'video consultation' : 'appointment'} scheduled for ${new Date(appointment.appointmentDate).toLocaleDateString()}`,
+                        link: isRemote ? '/telemedicine' : '/doctor/appointments'
                     });
 
                     const io = socketService.getIO();
@@ -118,7 +128,8 @@ exports.getAppointments = async (req, res) => {
                 select: 'userId patientCardNumber',
                 populate: { path: 'userId', select: 'name email phone' }
             })
-            .populate('doctorId', 'name email specialization department');
+            .populate('doctorId', 'name email specialization department')
+            .sort({ appointmentDate: 1 });
 
         res.json({ success: true, data: appointments });
     } catch (error) {
@@ -156,6 +167,19 @@ exports.updateAppointment = async (req, res) => {
         const referenceError = await validateReferences(req, updates);
         if (referenceError) {
             return res.status(400).json({ success: false, message: referenceError });
+        }
+
+        // Moving an appointment to another time or doctor must respect the same booking rules
+        if (updates.appointmentDate !== undefined || updates.doctorId !== undefined) {
+            const current = await Appointment.findOne(query).select('doctorId appointmentDate isUrgent');
+            if (!current) return res.status(404).json({ success: false, message: 'Appointment not found' });
+            const slotError = await checkSlot({
+                doctorId: updates.doctorId || current.doctorId,
+                appointmentDate: updates.appointmentDate || current.appointmentDate,
+                isUrgent: updates.isUrgent ?? current.isUrgent,
+                excludeAppointmentId: current._id,
+            });
+            if (slotError) return res.status(409).json({ success: false, message: slotError });
         }
 
         const appointment = await Appointment.findOneAndUpdate(query, updates, { new: true, runValidators: true });
