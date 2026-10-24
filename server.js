@@ -137,6 +137,7 @@ const startServer = async () => {
     socket.init(server);
     return server.listen(PORT, () => {
         console.log(`Server is running on port ${PORT}`);
+        console.log(require('./utils/email').describeEmailConfig());
         console.log(`Audit logging enabled - logs stored in ./logs/`);
     });
 };
