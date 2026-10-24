@@ -140,7 +140,8 @@ exports.getAllStaff = async (req, res) => {
 exports.inviteStaffMember = async (req, res) => {
     try {
         const hospitalId = req.tenant?.hospital?._id;
-        const { email, name, role, department } = req.body;
+        const { name, role, department, phone, specialization, licenseNumber, yearsOfExperience } = req.body || {};
+        const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
 
         if (!hospitalId) {
             return res.status(400).json({ error: 'Hospital context required' });
@@ -157,6 +158,18 @@ exports.inviteStaffMember = async (req, res) => {
                 error: `Invalid role. Must be one of: ${INVITABLE_ROLES.join(', ')}`,
             });
         }
+
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            return res.status(400).json({ error: 'Enter a valid email address' });
+        }
+
+        // Optional professional details (used when adding a doctor)
+        const str = (v, max) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : undefined);
+        const years = yearsOfExperience === undefined || yearsOfExperience === '' ? undefined : Number.parseInt(yearsOfExperience, 10);
+        if (years !== undefined && (Number.isNaN(years) || years < 0 || years > 70)) {
+            return res.status(400).json({ error: 'Years of experience must be a valid number' });
+        }
+        const isDoctor = String(role).toLowerCase() === 'doctor';
 
         // Check if user already exists in hospital
         const existingUser = await User.findOne({ email, hospitalId });
@@ -181,7 +194,9 @@ exports.inviteStaffMember = async (req, res) => {
             role: String(role).toLowerCase(),
             hospitalId,
             status: 'pending',
-            department,
+            department: str(department, 100),
+            phone: str(phone, 40),
+            ...(isDoctor ? { specialization: str(specialization, 100), licenseNumber: str(licenseNumber, 60), yearsOfExperience: years } : {}),
             invitationToken,
             invitationExpires,
             invitedBy: req.user._id,

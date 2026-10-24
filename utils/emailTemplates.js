@@ -189,8 +189,38 @@ const passwordChangedEmail = ({ name, changedAt = new Date() }) => {
     return { subject, html, text };
 };
 
+/** Outcome of a doctor/nurse application to join a hospital */
+const applicationDecisionEmail = ({ name, hospitalName, approved, reason, loginUrl }) => {
+    const hospital = hospitalName || 'the hospital';
+    const subject = approved
+        ? `Your ${hospital} account has been approved — ${APP_NAME}`
+        : `Update on your application to ${hospital} — ${APP_NAME}`;
+    const html = layout({
+        preheader: approved ? 'Your account is now active' : 'Your application was not approved',
+        heading: approved ? 'Your account is approved' : 'Your application was not approved',
+        bodyHtml:
+            paragraph(`Hi ${escapeHtml(firstName(name))},`) +
+            (approved
+                ? paragraph(`An administrator at <strong>${escapeHtml(hospital)}</strong> approved your account. You can now log in${loginUrl ? ` at <a href="${escapeHtml(loginUrl)}">${escapeHtml(loginUrl)}</a>` : ''}.`)
+                : paragraph(`An administrator at <strong>${escapeHtml(hospital)}</strong> reviewed your application and did not approve it.`) +
+                  (reason ? notice(`<strong>Reason:</strong> ${escapeHtml(reason)}`) : '') +
+                  paragraph('If you think this is a mistake, please contact the hospital administration.')),
+    });
+    const text = [
+        `Hi ${firstName(name)},`,
+        '',
+        approved
+            ? `An administrator at ${hospital} approved your account. You can now log in${loginUrl ? ` at ${loginUrl}` : ''}.`
+            : `An administrator at ${hospital} reviewed your application and did not approve it.${reason ? `\n\nReason: ${reason}` : ''}\n\nIf you think this is a mistake, please contact the hospital administration.`,
+        '',
+        `— ${APP_NAME}`,
+    ].join('\n');
+    return { subject, html, text };
+};
+
 module.exports = {
     escapeHtml,
+    applicationDecisionEmail,
     verificationCodeEmail,
     passwordResetCodeEmail,
     passwordChangedEmail,

@@ -219,11 +219,35 @@ describe('authController', () => {
             User.findOne = jest.fn().mockResolvedValue(null);
             const user = mockNewUser('doctor-456');
 
-            await register({ body: { ...baseBody, userType: 'staff', role: 'DOCTOR' } }, res);
+            await register({ body: { ...baseBody, userType: 'staff', role: 'DOCTOR', specialization: 'Paediatrics', licenseNumber: 'MD2' } }, res);
 
             expect(user.save).toHaveBeenCalled();
             expect(user.yearsOfExperience).toBeUndefined();
             expect(res.status).toHaveBeenCalledWith(201);
+        });
+
+        it('requires a specialization and license number for doctors', async () => {
+            const res = createMockResponse();
+            User.findOne = jest.fn().mockResolvedValue(null);
+            mockNewUser('doctor-789');
+
+            await register({ body: { ...baseBody, userType: 'staff', role: 'DOCTOR', specialization: '  ' } }, res);
+
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(res.json).toHaveBeenCalledWith({ message: 'Specialization and license number are required for doctors' });
+            expect(User).not.toHaveBeenCalled();
+        });
+
+        it('treats a duplicate submission caught by the unique index as an existing email', async () => {
+            const res = createMockResponse();
+            User.findOne = jest.fn().mockResolvedValue(null);
+            const user = mockNewUser('doctor-dup');
+            user.save.mockRejectedValue(Object.assign(new Error('E11000 duplicate key'), { code: 11000 }));
+
+            await register({ body: { ...baseBody, userType: 'staff', role: 'NURSE' } }, res);
+
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(res.json).toHaveBeenCalledWith({ message: 'Email already exists in this hospital' });
         });
 
         it.each(['ADMIN', 'STAFF', 'SUPER_ADMIN', 'HOSPITAL_ADMIN'])('refuses self-registration as %s', async (role) => {

@@ -146,6 +146,10 @@ const updateUser = async (hospitalId, userId, body = {}, actor) => {
         if (isSelf) throw httpError(400, 'You cannot change your own account status');
         if (protectedAdmin) throw httpError(403, 'Only the platform super admin can change a hospital admin\'s status');
         if (!['active', 'inactive', 'suspended'].includes(body.status)) throw httpError(400, 'Status must be active, inactive or suspended');
+        // Pending accounts are either applications (decided on the Approvals page) or
+        // invitations (activated when the invitee sets a password); rejected ones stay rejected
+        if (user.status === 'pending') throw httpError(400, user.invitedBy ? 'This person activates their account by accepting the invitation' : 'Approve or reject this application from Approvals');
+        if (user.status === 'rejected') throw httpError(400, 'This application was rejected, so the account cannot be activated');
         changes.status = body.status;
     }
 

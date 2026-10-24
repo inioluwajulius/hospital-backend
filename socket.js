@@ -2,9 +2,12 @@ const socketIo = require('socket.io');
 const jwt = require('jsonwebtoken');
 const tokenHospitalId = require('./utils/tokenHospital');
 const { loadConsultation, consultationRoom } = require('./utils/consultationAccess');
+const callSignalling = require('./utils/callSignalling');
 
 // Signalling messages relayed between the two participants of a call
-const SIGNAL_TYPES = ['offer', 'answer', 'candidate', 'hangup', 'decline'];
+// ('media' carries camera on/off so the other side can show a placeholder; 'ready' tells the
+// caller that the person who answered has joined the room, so the offer can be sent)
+const SIGNAL_TYPES = ['offer', 'answer', 'candidate', 'hangup', 'decline', 'media', 'ready'];
 
 let io;
 
@@ -16,6 +19,7 @@ module.exports = {
                 methods: ['GET', 'POST']
             }
         });
+        const registerCalls = callSignalling.register(io);
 
         io.use((socket, next) => {
             // Prefer handshake.auth (not logged in URLs); query kept for older clients
@@ -46,6 +50,9 @@ module.exports = {
             socket.data.consultations = new Set();
             const consultUser = () => ({ userId: socket.user.userId, role: socket.user.role, hospitalId: tokenHospitalId(socket.user) });
 
+            // Ringing: the incoming-call popup on any page (see utils/callSignalling.js)
+            registerCalls(socket, consultUser);
+
             socket.on('consult:join', async ({ appointmentId } = {}, ack = () => {}) => {
                 try {
                     const access = await loadConsultation(consultUser(), appointmentId);
@@ -66,6 +73,7 @@ module.exports = {
             socket.on('consult:signal', ({ appointmentId, type, payload } = {}) => {
                 // Only relay within rooms this socket was allowed into
                 if (!socket.data.consultations.has(String(appointmentId)) || !SIGNAL_TYPES.includes(type)) return;
+                if (type === 'hangup' || type === 'decline') callSignalling.endCallsFor(appointmentId);
                 socket.to(consultationRoom(appointmentId)).emit('consult:signal', { type, payload, from: socket.data.participant });
             });
 

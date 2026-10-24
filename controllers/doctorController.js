@@ -62,17 +62,20 @@ exports.createDoctor = async (req, res) => {
 exports.getDoctors = async (req, res) => {
     try {
         const query = { role: 'doctor' };
-        
-        // Multi-tenant isolation: fetch doctors for this hospital OR doctors with no hospital assigned
+
+        // Multi-tenant isolation: only this hospital's doctors. Doctors without a hospital
+        // are not shown to any hospital (the super admin's global view still lists them).
         if (req.tenantFilter && req.tenantFilter.hospitalId) {
-            query.$or = [
-                { hospitalId: req.tenantFilter.hospitalId },
-                { hospitalId: { $exists: false } },
-                { hospitalId: null }
-            ];
+            query.hospitalId = req.tenantFilter.hospitalId;
         }
 
-        const doctors = await User.find(query).select('-password -__v -emailVerificationToken -resetPasswordToken');
+        // Applications (pending/rejected) live on the approvals page, not in the directory.
+        // Admins also see deactivated doctors; everyone else only doctors who can take patients.
+        const isAdmin = ['hospital_admin', 'super_admin', 'admin'].includes(req.user?.role) || req.user?.isSuperAdmin;
+        // $nin also matches older records saved before the status field existed (treated as active)
+        query.status = { $nin: isAdmin ? ['pending', 'rejected'] : ['pending', 'rejected', 'inactive', 'suspended'] };
+
+        const doctors = await User.find(query).select('-password -__v -emailVerificationToken -resetPasswordToken -invitationToken');
         
         res.json({
             success: true,
@@ -122,6 +125,13 @@ exports.updateDoctor = async (req, res) => {
         const updates = {};
         for (const field of UPDATABLE_DOCTOR_FIELDS) {
             if (req.body[field] !== undefined) updates[field] = req.body[field];
+        }
+        // Applications are decided on the approvals page (which records who decided), not here
+        if (updates.status !== undefined) {
+            if (!['active', 'inactive', 'suspended'].includes(updates.status)) {
+                return res.status(400).json({ message: 'Status must be active, inactive or suspended' });
+            }
+            query.status = { $nin: ['pending', 'rejected'] };
         }
 
         const doctor = await User.findOneAndUpdate(query, updates, { new: true, runValidators: true }).select('-password');

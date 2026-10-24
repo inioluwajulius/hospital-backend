@@ -2,15 +2,15 @@ const express = require('express');
 const router = express.Router();
 const authMiddleware = require('../../../middleware/authMiddleware');
 const authorize = require('../../../middleware/roleMiddleware');
-const { getPendingUsers, approveUser, rejectUser } = require('../../../controllers/userController');
+const { getPendingUsers, getRegistration, approveUser, rejectUser } = require('../../../controllers/userController');
 
-// GET - Get all pending users (doctors awaiting approval) - admin only
+// Staff applications awaiting approval. 'admin' = hospital admins (own hospital) and the
+// super admin; the controller scopes every query to the hospital.
 router.get('/registrations/pending', authMiddleware, authorize('admin'), getPendingUsers);
+router.get('/registrations/:userId', authMiddleware, authorize('admin'), getRegistration);
 
-// PUT - Approve pending user registration (admin only)
+// Decide on a pending application (atomic: only a still-pending application changes)
 router.put('/:userId/approve', authMiddleware, authorize('admin'), approveUser);
-
-// PUT - Reject pending user registration (admin only)
 router.put('/:userId/reject', authMiddleware, authorize('admin'), rejectUser);
 
 module.exports = router;

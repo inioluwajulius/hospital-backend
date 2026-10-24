@@ -5,6 +5,7 @@ const Patient = require('../models/Patient');
 const Notification = require('../models/Notification');
 const socketService = require('../socket');
 const { loadConsultation, consultationRoom } = require('../utils/consultationAccess');
+const { getIceServers: getIceServerConfig } = require('../utils/iceServers');
 
 /**
  * Telemedicine consultations: details, chat, start and completion.
@@ -211,18 +212,11 @@ exports.completeConsultation = async (req, res) => {
 };
 
 /**
- * GET /consultations/ice-servers  STUN/TURN servers for the call.
- * TURN is optional (TURN_URL, TURN_USERNAME, TURN_CREDENTIAL) and helps on strict networks.
+ * GET /consultations/ice-servers  STUN/TURN servers for the call (see utils/iceServers.js).
+ * `relay` tells the client whether a TURN relay is available for strict networks.
  */
 exports.getIceServers = (req, res) => {
-    const iceServers = [{ urls: (process.env.STUN_URLS || 'stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302').split(',').map((s) => s.trim()).filter(Boolean) }];
-    if (process.env.TURN_URL) {
-        iceServers.push({
-            urls: process.env.TURN_URL.split(',').map((s) => s.trim()),
-            username: process.env.TURN_USERNAME,
-            credential: process.env.TURN_CREDENTIAL,
-        });
-    }
-    res.json({ success: true, data: { iceServers, realtimeAvailable: Boolean(socketService.getIO()) } });
+    const { iceServers, relay } = getIceServerConfig();
+    res.json({ success: true, data: { iceServers, relay, realtimeAvailable: Boolean(socketService.getIO()) } });
 };
 

@@ -29,12 +29,14 @@ exports.otpVerifyLimiter = rateLimit({
     legacyHeaders: false,
 });
 
-// Stricter rate limiter specifically for account creation
-// Limits each IP to 3 accounts per hour
+// Account creation: 20 new accounts per IP per hour. Only successful sign-ups count,
+// so fixing a typo or a weak password doesn't use up the allowance, and a clinic
+// where many patients register over the same Wi-Fi isn't locked out.
 exports.accountCreationLimiter = rateLimit({
     windowMs: 60 * 60 * 1000, // 1 hour
-    max: 3, // Limit each IP to 3 account creations per hour
-    message: { message: 'Too many accounts created from this IP, please try again after an hour' },
+    max: 20,
+    skipFailedRequests: true,
+    message: { message: 'Too many accounts were created from this network. Please try again in an hour.' },
     standardHeaders: true,
     legacyHeaders: false,
 });

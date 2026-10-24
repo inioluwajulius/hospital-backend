@@ -11,9 +11,23 @@ require('dotenv').config();
 
 const app = express();
 
-// Trust proxy if we're behind a load balancer (e.g. NGINX, AWS ELB, Heroku)
-// This ensures rate limiting works based on the actual client IP, not the proxy IP
-app.set('trust proxy', 1);
+// Number of reverse proxies in front of the app, so req.ip (and therefore rate
+// limiting) uses the real client IP instead of a proxy's IP shared by every user.
+// Render chains several proxies: set TRUST_PROXY there (see .env.example).
+const trustProxy = Number.parseInt(process.env.TRUST_PROXY, 10);
+app.set('trust proxy', Number.isInteger(trustProxy) && trustProxy >= 0 ? trustProxy : 1);
+
+// Log once how many proxy hops the first request came through (a count, no addresses),
+// so TRUST_PROXY can be set to match the hosting platform
+let proxyHopsLogged = false;
+app.use((req, res, next) => {
+    if (!proxyHopsLogged && req.headers['x-forwarded-for']) {
+        proxyHopsLogged = true;
+        const hops = String(req.headers['x-forwarded-for']).split(',').length;
+        console.log(`Proxy check: X-Forwarded-For lists ${hops} address(es); trust proxy is ${app.get('trust proxy')}. Set TRUST_PROXY=${hops} if clients connect directly to this platform's proxies.`);
+    }
+    next();
+});
 
 // Middleware
 const corsOptions = {
@@ -138,6 +152,7 @@ const startServer = async () => {
     return server.listen(PORT, () => {
         console.log(`Server is running on port ${PORT}`);
         console.log(require('./utils/email').describeEmailConfig());
+        console.log(require('./utils/iceServers').describeIceConfig());
         console.log(`Audit logging enabled - logs stored in ./logs/`);
     });
 };

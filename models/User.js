@@ -75,6 +75,14 @@ const userSchema = new mongoose.Schema({
         enum: ['active', 'pending', 'rejected', 'inactive', 'suspended'],
         default: 'active'
     },
+
+    // Decision on a self-registered staff application (doctor/nurse). The account
+    // stays 'pending' until a hospital admin of the same hospital decides.
+    approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    approvedAt: Date,
+    rejectedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    rejectedAt: Date,
+    rejectionReason: { type: String, maxlength: 500 },
     
     // Patient-specific fields
     patientCardNumber: {
@@ -157,6 +165,7 @@ const userSchema = new mongoose.Schema({
 // isSuperAdmin already indexed via index:true in field definition
 userSchema.index({ email: 1, hospitalId: 1 }, { unique: true, sparse: true });
 userSchema.index({ hospitalId: 1, role: 1 });
+userSchema.index({ hospitalId: 1, status: 1, role: 1 });
 userSchema.index({ invitationToken: 1 });
 
 const stripSensitiveFields = (_, ret) => {

@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Appointment = require('../models/Appointment');
 const Notification = require('../models/Notification');
 const socketService = require('../socket');
@@ -24,8 +25,11 @@ const validateReferences = async (req, data) => {
     const hospitalId = req.tenantFilter?.hospitalId;
     if (!hospitalId) return null;
     if (data.doctorId !== undefined) {
-        const doctor = await User.findOne({ _id: data.doctorId, role: 'doctor', hospitalId }).select('_id');
+        if (!mongoose.isValidObjectId(data.doctorId)) return 'Please choose a doctor';
+        const doctor = await User.findOne({ _id: data.doctorId, role: 'doctor', hospitalId }).select('status');
         if (!doctor) return 'Doctor not found in this hospital';
+        // Only approved, active doctors take appointments (missing status = older active account)
+        if (doctor.status && doctor.status !== 'active') return 'This doctor is not accepting appointments right now. Please choose another doctor.';
     }
     if (data.patientId !== undefined) {
         const patient = await Patient.findOne({ _id: data.patientId, hospitalId }).select('_id');
@@ -98,7 +102,10 @@ exports.createAppointment = async (req, res) => {
 
         res.status(201).json({ success: true, data: appointment });
     } catch (error) {
-        res.status(400).json({ success: false, error: error.message });
+        const message = error.name === 'ValidationError' || error.name === 'CastError'
+            ? 'Some booking details are missing or invalid. Please check the doctor, date, time and reason.'
+            : 'Could not book the appointment. Please try again.';
+        res.status(400).json({ success: false, message, error: error.message });
     }
 };
 

@@ -4,19 +4,29 @@ const authMiddleware = require('../../../middleware/authMiddleware');
 
 const router = express.Router();
 
-// Audit logs are not scoped per hospital, so only platform super admins may read them
 const isPlatformAdmin = (req) => req.user.isSuperAdmin === true || req.user.role === 'super_admin';
+
+/**
+ * Which audit entries the caller may read: the super admin sees all (optionally one
+ * hospital via ?hospitalId), a hospital admin only entries recorded for their own
+ * hospital (from the signed token). Everyone else: null (no access).
+ */
+const auditScope = (req) => {
+    if (isPlatformAdmin(req)) return req.tenant?.id ? { hospitalId: req.tenant.id } : {};
+    if (req.user.role === 'hospital_admin' && req.user.hospitalId) return { hospitalId: req.user.hospitalId };
+    return null;
+};
 
 // Get all audit logs (Admin only)
 router.get('/', authMiddleware, async (req, res) => {
     try {
-        // Check if user is admin
-        if (!isPlatformAdmin(req)) {
+        const scope = auditScope(req);
+        if (!scope) {
             return res.status(403).json({ message: 'Access denied. Admin only.' });
         }
 
         const { module, severity, limit = 50, skip = 0 } = req.query;
-        let query = {};
+        let query = { ...scope };
 
         if (module) query.module = module;
         if (severity) query.severity = severity;
@@ -42,11 +52,12 @@ router.get('/', authMiddleware, async (req, res) => {
 // Get audit log by ID
 router.get('/:id', authMiddleware, async (req, res) => {
     try {
-        if (!isPlatformAdmin(req)) {
+        const scope = auditScope(req);
+        if (!scope) {
             return res.status(403).json({ message: 'Access denied. Admin only.' });
         }
 
-        const log = await AuditLog.findById(req.params.id);
+        const log = await AuditLog.findOne({ _id: req.params.id, ...scope });
         if (!log) {
             return res.status(404).json({ message: 'Audit log not found' });
         }
@@ -79,6 +90,7 @@ router.post('/', authMiddleware, async (req, res) => {
             userId,
             userName,
             userRole,
+            hospitalId: req.user.hospitalId || undefined,
             action,
             module,
             severity,
@@ -133,11 +145,12 @@ router.get('/module/:module', authMiddleware, async (req, res) => {
 // Export audit logs (CSV format)
 router.get('/export/csv', authMiddleware, async (req, res) => {
     try {
-        if (!isPlatformAdmin(req)) {
+        const scope = auditScope(req);
+        if (!scope) {
             return res.status(403).json({ message: 'Access denied. Admin only.' });
         }
 
-        const logs = await AuditLog.find().sort({ timestamp: -1 });
+        const logs = await AuditLog.find(scope).sort({ timestamp: -1 }).limit(5000);
 
         // Convert to CSV
         let csv = 'Timestamp,User,Role,Action,Module,Severity,Status\n';

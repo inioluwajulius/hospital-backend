@@ -128,8 +128,15 @@ const handleStaffRegistration = async (req, res, { name, normalizedEmail, hashed
             ? undefined
             : Number.parseInt(yearsOfExperience, 10);
 
-    if (role.toLowerCase() === 'doctor' && parsedYearsOfExperience !== undefined && Number.isNaN(parsedYearsOfExperience)) {
+    if (role.toLowerCase() === 'doctor' && parsedYearsOfExperience !== undefined && (Number.isNaN(parsedYearsOfExperience) || parsedYearsOfExperience < 0 || parsedYearsOfExperience > 70)) {
         return res.status(400).json({ message: 'Years of experience must be a valid number' });
+    }
+
+    // Administrators need the professional details to review a doctor's application
+    const cleanSpecialization = typeof specialization === 'string' ? specialization.trim().slice(0, 100) : '';
+    const cleanLicenseNumber = typeof licenseNumber === 'string' ? licenseNumber.trim().slice(0, 60) : '';
+    if (role.toLowerCase() === 'doctor' && (!cleanSpecialization || !cleanLicenseNumber)) {
+        return res.status(400).json({ message: 'Specialization and license number are required for doctors' });
     }
 
     // Self-registered staff require hospital admin approval before they can log in
@@ -146,8 +153,8 @@ const handleStaffRegistration = async (req, res, { name, normalizedEmail, hashed
         status: Status,
         hospitalId: effectiveHospitalId ? new mongoose.Types.ObjectId(effectiveHospitalId) : undefined,
         // Doctor-specific fields
-        specialization: role.toLowerCase() === 'doctor' ? specialization : undefined,
-        licenseNumber: role.toLowerCase() === 'doctor' ? licenseNumber : undefined,
+        specialization: role.toLowerCase() === 'doctor' ? cleanSpecialization : undefined,
+        licenseNumber: role.toLowerCase() === 'doctor' ? cleanLicenseNumber : undefined,
         yearsOfExperience: role.toLowerCase() === 'doctor' ? parsedYearsOfExperience : undefined,
     });
     await newUser.save();
@@ -161,8 +168,9 @@ const handleStaffRegistration = async (req, res, { name, normalizedEmail, hashed
                     recipient: admin._id,
                     hospitalId: effectiveHospitalId,
                     type: 'REGISTRATION',
-                    message: `New staff member registered: ${name} (${role.toUpperCase()})`,
-                    link: '/admin/pending-approvals'
+                    message: `New ${role.toLowerCase()} application awaiting approval: ${name}`,
+                    // Opens this application on the approvals page
+                    link: `/admin/pending-approvals?application=${newUser._id}`
                 }));
                 const savedNotifications = await Notification.insertMany(notifications);
                 
@@ -370,11 +378,13 @@ exports.register = async (req, res) => {
         return res.status(400).json({ message: 'Invalid user type. Must be "staff" or "patient"' });
 
     } catch (error) {
+        // Two submissions of the same form racing past the duplicate check: the unique
+        // (email, hospitalId) index rejects the second one
+        if (error && error.code === 11000) {
+            return res.status(400).json({ message: 'Email already exists in this hospital' });
+        }
         console.error('Registration Error:', error);
-        return res.status(500).json({
-            message: 'Server error: ' + error.message,
-            error: error.message
-        });
+        return res.status(500).json({ message: 'Registration failed. Please try again.' });
     }
 };
 

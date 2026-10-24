@@ -17,8 +17,14 @@ const auditLogSchema = new mongoose.Schema({
     },
     userRole: {
         type: String,
-        enum: ['admin', 'doctor', 'nurse', 'receptionist', 'lab_technician', 'pharmacist', 'radiologist', 'patient', 'accountant'],
+        enum: ['admin', 'super_admin', 'hospital_admin', 'doctor', 'nurse', 'receptionist', 'lab_technician', 'pharmacist', 'radiologist', 'patient', 'accountant'],
         required: true,
+    },
+    // Hospital the action belongs to; hospital admins only see their own hospital's entries
+    hospitalId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Hospital',
+        index: true,
     },
     userAvatar: {
         type: String,
