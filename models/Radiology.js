@@ -7,15 +7,22 @@ const radiologySchema = new mongoose.Schema({
         required: true
     },
 
+    hospitalId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Hospital',
+        index: true
+    },
+
     examOrder: {
         type: String,
         unique: true,
         required: true
     },
 
+    // Ordering doctor (doctors are Users)
     doctorId: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'Doctor'
+        ref: 'User'
     },
 
     radiologist: {

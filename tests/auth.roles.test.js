@@ -14,7 +14,7 @@ describe('Authenticated role checks', () => {
         const token = makeToken('patient');
 
         const response = await request(app)
-            .get('/api/medical-records/patient/507f1f77bcf86cd799439011')
+            .get('/api/v1/medical-records/patient/507f1f77bcf86cd799439011')
             .set('Authorization', `Bearer ${token}`);
 
         expect(response.statusCode).toBe(403);
@@ -25,7 +25,7 @@ describe('Authenticated role checks', () => {
         const token = makeToken('nurse');
 
         const response = await request(app)
-            .post('/api/prescriptions')
+            .post('/api/v1/prescriptions')
             .set('Authorization', `Bearer ${token}`)
             .send({});
 
@@ -33,12 +33,13 @@ describe('Authenticated role checks', () => {
         expect(response.body).toEqual({ message: 'Forbidden: Insufficient permissions' });
     });
 
-    it('blocks doctor role from lab tests admin endpoint', async () => {
+    it('blocks doctor role from editing lab test results', async () => {
         const token = makeToken('doctor');
 
         const response = await request(app)
-            .get('/api/lab/tests')
-            .set('Authorization', `Bearer ${token}`);
+            .put('/api/v1/lab/tests/507f1f77bcf86cd799439011')
+            .set('Authorization', `Bearer ${token}`)
+            .send({ result: 'tampered' });
 
         expect(response.statusCode).toBe(403);
         expect(response.body).toEqual({ message: 'Forbidden: Insufficient permissions' });

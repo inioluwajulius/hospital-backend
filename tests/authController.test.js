@@ -1,6 +1,8 @@
 jest.mock('../models/User');
 jest.mock('../models/Patient');
 jest.mock('../models/Hospital');
+jest.mock('../models/Notification');
+jest.mock('../utils/email', () => jest.fn().mockResolvedValue());
 jest.mock('bcryptjs');
 jest.mock('jsonwebtoken');
 
@@ -9,8 +11,11 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const Patient = require('../models/Patient');
 const Hospital = require('../models/Hospital');
+const sendEmail = require('../utils/email');
 
-const { login, register, PASSWORD_REQUIREMENTS_MESSAGE } = require('../controllers/authController');
+const { login, register, forgotPassword, PASSWORD_REQUIREMENTS_MESSAGE } = require('../controllers/authController');
+
+const HOSPITAL_ID = '64b000000000000000000001';
 
 function createMockResponse() {
     const res = {};
@@ -19,263 +24,270 @@ function createMockResponse() {
     return res;
 }
 
-describe('authController privacy', () => {
+// User.find(query).populate(...).select('+password') -> users
+const mockLoginLookup = (users) => {
+    const select = jest.fn().mockResolvedValue(users);
+    const populate = jest.fn().mockReturnValue({ select });
+    User.find = jest.fn().mockReturnValue({ populate });
+    return { select, populate };
+};
+
+// Hospital.findById(id).select('status') -> hospital
+const mockHospital = (hospital = { _id: HOSPITAL_ID, status: 'active' }) => {
+    Hospital.findById = jest.fn().mockReturnValue({ select: jest.fn().mockResolvedValue(hospital) });
+};
+
+const mockNewUser = (id) => {
+    const instance = { _id: id, email: 'x', save: jest.fn().mockResolvedValue(true) };
+    User.mockImplementation((data) => Object.assign(instance, data, { _id: id }));
+    return instance;
+};
+
+const activeUser = (overrides = {}) => ({
+    _id: '507f1f77bcf86cd799439011',
+    name: 'Patient One',
+    email: 'patient@gmail.com',
+    role: 'patient',
+    status: 'active',
+    password: 'hashed-password',
+    patientCardNumber: 'PAT-123456',
+    hospitalId: { _id: HOSPITAL_ID, name: 'General' },
+    ...overrides,
+});
+
+describe('authController', () => {
     beforeEach(() => {
         jest.clearAllMocks();
-        Hospital.findOne = jest.fn().mockResolvedValue({ _id: '507f1f77bcf86cd799439011' });
-    });
-
-    it('returns a sanitized user payload on login', async () => {
-        const req = {
-            body: {
-                email: 'patient@gmail.com',
-                password: 'Strong#123'
-            }
-        };
-        const res = createMockResponse();
-
-        const existingUser = {
-            _id: '507f1f77bcf86cd799439011',
-            name: 'Patient One',
-            email: 'patient@gmail.com',
-            role: 'patient',
-            password: 'hashed-password',
-            patientCardNumber: 'PAT-123456'
-        };
-
-        const select = jest.fn().mockResolvedValue(existingUser);
-        User.findOne = jest.fn().mockReturnValue({ select });
-        bcrypt.compare.mockResolvedValue(true);
+        mockHospital();
+        // No hospital admins to notify by default
+        User.find = jest.fn().mockResolvedValue([]);
         jwt.sign.mockReturnValue('signed-token');
+        bcrypt.hash.mockResolvedValue('hashed-password-123');
+    });
 
-        await login(req, res);
+    describe('login', () => {
+        it('returns a sanitized user payload', async () => {
+            const req = { body: { email: 'patient@gmail.com', password: 'Strong#123' } };
+            const res = createMockResponse();
+            const user = activeUser();
+            const { select } = mockLoginLookup([user]);
+            bcrypt.compare.mockResolvedValue(true);
 
-        expect(User.findOne).toHaveBeenCalledWith({ email: req.body.email });
-        expect(select).toHaveBeenCalledWith('+password');
-        expect(bcrypt.compare).toHaveBeenCalledWith(req.body.password, existingUser.password);
-        expect(res.json).toHaveBeenCalledWith({
-            token: 'signed-token',
-            user: {
-                id: existingUser._id,
-                name: existingUser.name,
-                email: existingUser.email,
-                role: existingUser.role
-            }
+            await login(req, res);
+
+            expect(User.find).toHaveBeenCalledWith({ email: 'patient@gmail.com' });
+            expect(select).toHaveBeenCalledWith('+password');
+            expect(bcrypt.compare).toHaveBeenCalledWith('Strong#123', 'hashed-password');
+            expect(res.json).toHaveBeenCalledWith({
+                token: 'signed-token',
+                user: { id: user._id, name: user.name, email: user.email, role: user.role }
+            });
+            const payload = res.json.mock.calls[0][0].user;
+            expect(payload.patientCardNumber).toBeUndefined();
+            expect(payload.password).toBeUndefined();
         });
-        expect(res.json.mock.calls[0][0].user.patientCardNumber).toBeUndefined();
-        expect(res.json.mock.calls[0][0].user.password).toBeUndefined();
-    });
 
-    it('rejects weak passwords during registration', async () => {
-        const req = {
-            body: {
-                name: 'Patient One',
-                email: 'patient@gmail.com',
-                password: 'weakpass',
-                userType: 'patient'
-            }
-        };
-        const res = createMockResponse();
+        it('normalizes email before lookup', async () => {
+            const req = { body: { email: '  PATIENT@Gmail.com ', password: 'Strong#123' } };
+            const res = createMockResponse();
+            mockLoginLookup([activeUser()]);
+            bcrypt.compare.mockResolvedValue(true);
 
-        await register(req, res);
+            await login(req, res);
 
-        expect(User.findOne).not.toHaveBeenCalled();
-        expect(bcrypt.hash).not.toHaveBeenCalled();
-        expect(res.status).toHaveBeenCalledWith(400);
-        expect(res.json).toHaveBeenCalledWith({ message: PASSWORD_REQUIREMENTS_MESSAGE });
-    });
+            expect(User.find).toHaveBeenCalledWith({ email: 'patient@gmail.com' });
+        });
 
-    it('normalizes email before login lookup', async () => {
-        const req = {
-            body: {
-                email: '  PATIENT@GMAIL.COM  ',
-                password: 'Strong#123'
-            }
-        };
-        const res = createMockResponse();
+        it('rejects missing password', async () => {
+            const res = createMockResponse();
+            mockLoginLookup([]);
 
-        const existingUser = {
-            _id: '507f1f77bcf86cd799439011',
-            name: 'Patient One',
-            email: 'patient@gmail.com',
-            role: 'patient',
-            password: 'hashed-password'
-        };
+            await login({ body: { email: 'patient@gmail.com' } }, res);
 
-        const select = jest.fn().mockResolvedValue(existingUser);
-        User.findOne = jest.fn().mockReturnValue({ select });
-        bcrypt.compare.mockResolvedValue(true);
-        jwt.sign.mockReturnValue('signed-token');
+            expect(User.find).not.toHaveBeenCalled();
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(res.json).toHaveBeenCalledWith({ message: 'Email and password are required' });
+        });
 
-        await login(req, res);
+        it('rejects invalid email format', async () => {
+            const res = createMockResponse();
+            mockLoginLookup([]);
 
-        expect(User.findOne).toHaveBeenCalledWith({ email: 'patient@gmail.com' });
-    });
+            await login({ body: { email: 'not-an-email', password: 'Strong#123' } }, res);
 
-    it('rejects login with missing password', async () => {
-        const req = {
-            body: {
-                email: 'patient@gmail.com'
-            }
-        };
-        const res = createMockResponse();
+            expect(User.find).not.toHaveBeenCalled();
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(res.json).toHaveBeenCalledWith({ message: 'Invalid email format' });
+        });
 
-        await login(req, res);
+        it.each(['pending', 'rejected', 'suspended', 'inactive'])('blocks %s accounts and issues no token', async (status) => {
+            const res = createMockResponse();
+            mockLoginLookup([activeUser({ role: 'doctor', status })]);
+            bcrypt.compare.mockResolvedValue(true);
 
-        expect(User.findOne).not.toHaveBeenCalled();
-        expect(res.status).toHaveBeenCalledWith(400);
-        expect(res.json).toHaveBeenCalledWith({ message: 'Email and password are required' });
-    });
+            await login({ body: { email: 'patient@gmail.com', password: 'Strong#123' } }, res);
 
-    it('rejects login with invalid email format', async () => {
-        const req = {
-            body: {
-                email: 'invalid-email',
-                password: 'Strong#123'
-            }
-        };
-        const res = createMockResponse();
-
-        await login(req, res);
-
-        expect(User.findOne).not.toHaveBeenCalled();
-        expect(res.status).toHaveBeenCalledWith(400);
-        expect(res.json).toHaveBeenCalledWith({ message: 'Invalid email format' });
-    });
-
-    it('successfully registers a new patient without card number', async () => {
-        const req = {
-            body: {
-                name: 'Jane Doe',
-                email: 'jane@gmail.com',
-                password: 'SecurePass#123',
-                userType: 'patient'
-            }
-        };
-        const res = createMockResponse();
-
-        User.findOne = jest.fn().mockResolvedValue(null); // No existing user
-        const mockUserInstance = {
-            _id: 'patient-123',
-            save: jest.fn().mockResolvedValue(true)
-        };
-        User.mockImplementation(() => mockUserInstance);
-        
-        const mockPatientInstance = {
-            save: jest.fn().mockResolvedValue(true)
-        };
-        Patient.mockImplementation(() => mockPatientInstance);
-        
-        bcrypt.hash = jest.fn().mockResolvedValue('hashed-password-123');
-
-        await register(req, res);
-
-        expect(User.findOne).toHaveBeenCalledWith({ email: 'jane@gmail.com' });
-        expect(bcrypt.hash).toHaveBeenCalledWith('SecurePass#123', 10);
-        expect(mockUserInstance.save).toHaveBeenCalled();
-        expect(mockPatientInstance.save).toHaveBeenCalled();
-        expect(res.status).toHaveBeenCalledWith(201);
-        expect(res.json).toHaveBeenCalledWith({
-            message: 'Registration successful! Your profile is pending admin verification. You will be notified once approved.',
-            userId: 'patient-123',
-            patientCardNumber: expect.any(String),
-            status: 'pending'
+            expect(res.status).toHaveBeenCalledWith(403);
+            expect(jwt.sign).not.toHaveBeenCalled();
         });
     });
 
-    it('rejects registration if email already exists', async () => {
-        const req = {
-            body: {
-                name: 'John Doe',
-                email: 'existing@gmail.com',
-                password: 'StrongPass#123',
-                userType: 'patient'
-            }
-        };
-        const res = createMockResponse();
+    describe('register', () => {
+        const baseBody = { name: 'Jane Doe', email: 'jane@gmail.com', password: 'Strong#123', hospitalId: HOSPITAL_ID };
 
-        const existingUser = { _id: '123', email: 'existing@gmail.com' };
-        User.findOne = jest.fn().mockResolvedValue(existingUser);
+        it('rejects weak passwords', async () => {
+            const res = createMockResponse();
+            User.findOne = jest.fn();
 
-        await register(req, res);
+            await register({ body: { ...baseBody, password: 'weakpass', userType: 'patient' } }, res);
 
-        expect(User.findOne).toHaveBeenCalledWith({ email: 'existing@gmail.com' });
-        expect(res.status).toHaveBeenCalledWith(400);
-        expect(res.json).toHaveBeenCalledWith({ message: 'Email already exists' });
-    });
+            expect(User.findOne).not.toHaveBeenCalled();
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(res.json).toHaveBeenCalledWith({ message: PASSWORD_REQUIREMENTS_MESSAGE });
+        });
 
-    it('rejects registration with missing required fields', async () => {
-        const req = {
-            body: {
-                name: '',
-                email: 'test@gmail.com',
-                password: 'StrongPass#123',
-                userType: 'patient'
-            }
-        };
-        const res = createMockResponse();
+        it('rejects missing required fields', async () => {
+            const res = createMockResponse();
 
-        await register(req, res);
+            await register({ body: { email: 'jane@gmail.com' } }, res);
 
-        expect(res.status).toHaveBeenCalledWith(400);
-        expect(res.json).toHaveBeenCalledWith({
-            message: 'Name, email, password, and user type are required'
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(res.json).toHaveBeenCalledWith({ message: 'Name, email, password, and user type are required' });
+        });
+
+        it('rejects an unknown or inactive hospital', async () => {
+            const res = createMockResponse();
+            mockHospital({ _id: HOSPITAL_ID, status: 'suspended' });
+
+            await register({ body: { ...baseBody, userType: 'patient' } }, res);
+
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(res.json).toHaveBeenCalledWith({ message: 'Invalid hospital' });
+        });
+
+        it('rejects a duplicate email in the same hospital', async () => {
+            const res = createMockResponse();
+            User.findOne = jest.fn().mockResolvedValue({ _id: 'existing' });
+
+            await register({ body: { ...baseBody, userType: 'patient' } }, res);
+
+            expect(User.findOne).toHaveBeenCalledWith({ email: 'jane@gmail.com', hospitalId: HOSPITAL_ID });
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(res.json).toHaveBeenCalledWith({ message: 'Email already exists in this hospital' });
+        });
+
+        it('registers a new patient with a generated card number', async () => {
+            const res = createMockResponse();
+            User.findOne = jest.fn().mockResolvedValue(null);
+            const user = mockNewUser('patient-123');
+            const patient = { save: jest.fn().mockResolvedValue(true) };
+            Patient.mockImplementation(() => patient);
+
+            await register({ body: { ...baseBody, userType: 'patient', phone: '08031234567', age: 30, gender: 'female' } }, res);
+
+            expect(user.save).toHaveBeenCalled();
+            expect(user.role).toBe('patient');
+            expect(patient.save).toHaveBeenCalled();
+            expect(res.status).toHaveBeenCalledWith(201);
+            const body = res.json.mock.calls[0][0];
+            expect(body.userId).toBe('patient-123');
+            expect(body.patientCardNumber).toMatch(/^PAT-\d{6}$/);
+        });
+
+        it('registers a doctor as pending approval', async () => {
+            const res = createMockResponse();
+            User.findOne = jest.fn().mockResolvedValue(null);
+            const user = mockNewUser('doctor-123');
+
+            await register({ body: { ...baseBody, email: 'doc@clinic.ng', userType: 'staff', role: 'DOCTOR', specialization: 'Cardiology', licenseNumber: 'MD1', yearsOfExperience: '5' } }, res);
+
+            expect(user.save).toHaveBeenCalled();
+            expect(user.role).toBe('doctor');
+            expect(user.status).toBe('pending');
+            expect(user.yearsOfExperience).toBe(5);
+            expect(res.status).toHaveBeenCalledWith(201);
+            expect(res.json.mock.calls[0][0].userId).toBe('doctor-123');
+        });
+
+        it('allows doctor registration without years of experience', async () => {
+            const res = createMockResponse();
+            User.findOne = jest.fn().mockResolvedValue(null);
+            const user = mockNewUser('doctor-456');
+
+            await register({ body: { ...baseBody, userType: 'staff', role: 'DOCTOR' } }, res);
+
+            expect(user.save).toHaveBeenCalled();
+            expect(user.yearsOfExperience).toBeUndefined();
+            expect(res.status).toHaveBeenCalledWith(201);
+        });
+
+        it.each(['ADMIN', 'STAFF', 'SUPER_ADMIN', 'HOSPITAL_ADMIN'])('refuses self-registration as %s', async (role) => {
+            const res = createMockResponse();
+            User.findOne = jest.fn().mockResolvedValue(null);
+            mockNewUser('x');
+
+            await register({ body: { ...baseBody, userType: 'staff', role } }, res);
+
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(User).not.toHaveBeenCalled();
+        });
+
+        describe('linking an existing patient record', () => {
+            const linkBody = { ...baseBody, userType: 'patient', existingPatientId: '507f1f77bcf86cd799439099' };
+
+            it('links when the phone matches and the record is unclaimed', async () => {
+                const res = createMockResponse();
+                User.findOne = jest.fn().mockResolvedValue(null);
+                const existing = { _id: linkBody.existingPatientId, phone: '0803 123 4567', patientCardNumber: 'PAT-111111', save: jest.fn().mockResolvedValue(true) };
+                Patient.findOne = jest.fn().mockResolvedValue(existing);
+                mockNewUser('linked-user');
+
+                await register({ body: { ...linkBody, phone: '08031234567' } }, res);
+
+                expect(Patient.findOne).toHaveBeenCalledWith({ _id: linkBody.existingPatientId, hospitalId: HOSPITAL_ID });
+                expect(existing.userId).toBe('linked-user');
+                expect(existing.save).toHaveBeenCalled();
+                expect(res.status).toHaveBeenCalledWith(201);
+            });
+
+            it('refuses when the phone does not match', async () => {
+                const res = createMockResponse();
+                User.findOne = jest.fn().mockResolvedValue(null);
+                Patient.findOne = jest.fn().mockResolvedValue({ phone: '08031234567', save: jest.fn() });
+
+                await register({ body: { ...linkBody, phone: '09000000000' } }, res);
+
+                expect(res.status).toHaveBeenCalledWith(404);
+                expect(User).not.toHaveBeenCalled();
+            });
+
+            it('refuses a record already linked to another account', async () => {
+                const res = createMockResponse();
+                User.findOne = jest.fn().mockResolvedValue(null);
+                Patient.findOne = jest.fn().mockResolvedValue({ phone: '08031234567', userId: 'someone-else', save: jest.fn() });
+
+                await register({ body: { ...linkBody, phone: '08031234567' } }, res);
+
+                expect(res.status).toHaveBeenCalledWith(400);
+                expect(User).not.toHaveBeenCalled();
+            });
         });
     });
 
-    it('successfully registers a non-patient user (doctor)', async () => {
-        const req = {
-            body: {
-                name: 'Dr. Smith',
-                email: 'doctor@hospital.com',
-                password: 'DoctorPass#123',
-                userType: 'staff',
-                role: 'DOCTOR'
-            }
-        };
-        const res = createMockResponse();
+    describe('forgotPassword', () => {
+        it('gives the same response whether or not the email exists', async () => {
+            const missingRes = createMockResponse();
+            User.findOne = jest.fn().mockResolvedValue(null);
+            await forgotPassword({ body: { email: 'nobody@gmail.com' } }, missingRes);
 
-        User.findOne = jest.fn().mockResolvedValue(null);
-        const mockUserInstance = {
-            _id: 'doctor-123',
-            save: jest.fn().mockResolvedValue(true)
-        };
-        User.mockImplementation(() => mockUserInstance);
-        bcrypt.hash = jest.fn().mockResolvedValue('hashed-password-456');
+            const existingRes = createMockResponse();
+            User.findOne = jest.fn().mockResolvedValue({ email: 'jane@gmail.com', save: jest.fn().mockResolvedValue(true) });
+            await forgotPassword({ body: { email: 'jane@gmail.com' } }, existingRes);
 
-        await register(req, res);
-
-        expect(User.findOne).toHaveBeenCalledWith({ email: 'doctor@hospital.com' });
-        expect(bcrypt.hash).toHaveBeenCalledWith('DoctorPass#123', 10);
-        expect(mockUserInstance.save).toHaveBeenCalled();
-        expect(res.status).toHaveBeenCalledWith(201);
-        expect(res.json).toHaveBeenCalledWith({ message: 'Staff registration successful', userId: 'doctor-123' });
-    });
-
-    it('allows doctor registration without years of experience', async () => {
-        const req = {
-            body: {
-                name: 'Dr. Smith',
-                email: 'doctor@hospital.com',
-                password: 'DoctorPass#123',
-                userType: 'staff',
-                role: 'DOCTOR'
-            }
-        };
-        const res = createMockResponse();
-
-        User.findOne = jest.fn().mockResolvedValue(null);
-        const mockUserInstance = {
-            _id: 'doctor-456',
-            save: jest.fn().mockResolvedValue(true)
-        };
-        User.mockImplementation(() => mockUserInstance);
-        bcrypt.hash = jest.fn().mockResolvedValue('hashed-password-456');
-
-        await register(req, res);
-
-        expect(mockUserInstance.save).toHaveBeenCalled();
-        expect(res.status).toHaveBeenCalledWith(201);
-        expect(res.json).toHaveBeenCalledWith({ message: 'Staff registration successful', userId: 'doctor-456' });
+            expect(missingRes.status).toHaveBeenCalledWith(200);
+            expect(existingRes.status).toHaveBeenCalledWith(200);
+            expect(missingRes.json.mock.calls[0][0]).toEqual(existingRes.json.mock.calls[0][0]);
+            expect(sendEmail).toHaveBeenCalledTimes(1);
+        });
     });
 });

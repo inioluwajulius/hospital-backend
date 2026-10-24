@@ -71,26 +71,41 @@ exports.deleteDrug = async (req, res) => {
 // Dispense a drug to a patient
 exports.dispenseDrug = async (req, res) => {
     try {
-        const { patientId, prescriptionId, drugId, quantity, pharmacistId } = req.body;
-        const drug = await Drug.findById(drugId);
-        if (!drug || !drug.isActive) {
-            return res.status(404).json({ message: 'Drug not found' });
+        const { patientId, prescriptionId, drugId } = req.body;
+        const quantity = Number(req.body.quantity);
+        if (!Number.isInteger(quantity) || quantity <= 0) {
+            return res.status(400).json({ message: 'Quantity must be a positive whole number' });
         }
-        if (drug.stock < quantity) {
-            return res.status(400).json({ message: 'Insufficient stock' });
+
+        // Check and decrement stock in one atomic update so concurrent
+        // dispenses can never drive stock below zero
+        const drug = await Drug.findOneAndUpdate(
+            { _id: drugId, isActive: true, stock: { $gte: quantity } },
+            { $inc: { stock: -quantity } },
+            { new: true }
+        );
+        if (!drug) {
+            const exists = await Drug.findOne({ _id: drugId, isActive: true }).select('_id');
+            return exists
+                ? res.status(400).json({ message: 'Insufficient stock' })
+                : res.status(404).json({ message: 'Drug not found' });
         }
-        // Update drug stock
-        drug.stock -= quantity;
-        await drug.save();
+
         // Create dispense record
         const newDispense = new Dispense({
             patientId,
             prescriptionId,
             drugId,
             quantity,
-            pharmacistId
+            pharmacistId: req.user.userId
         });
-        await newDispense.save();
+        try {
+            await newDispense.save();
+        } catch (saveError) {
+            // Put the stock back if the record couldn't be saved
+            await Drug.updateOne({ _id: drugId }, { $inc: { stock: quantity } });
+            throw saveError;
+        }
         res.status(201).json({ message: 'Drug dispensed successfully', dispense: newDispense });
     } catch (error) {
         res.status(500).json({ message: 'Error dispensing drug', error: error.message });

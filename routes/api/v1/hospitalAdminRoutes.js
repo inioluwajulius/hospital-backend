@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const hospitalAdminController = require('../../../controllers/hospitalAdminController');
 const authMiddleware = require('../../../middleware/authMiddleware');
+const authorize = require('../../../middleware/roleMiddleware');
 const { requireTenant, authorizeTenant } = require('../../../middleware/tenantMiddleware');
 
 /**
@@ -9,8 +10,12 @@ const { requireTenant, authorizeTenant } = require('../../../middleware/tenantMi
  * Routes for managing hospital-level operations
  */
 
-// Apply tenant and auth middleware
+// Invitation acceptance (public route - the invitee has no account yet, the token is the credential)
+router.post('/invitations/:token/accept', hospitalAdminController.acceptInvitation);
+
+// Everything below requires a hospital admin of this hospital
 router.use(authMiddleware);
+router.use(authorize('hospital_admin'));
 router.use(requireTenant);
 router.use(authorizeTenant);
 
@@ -27,8 +32,5 @@ router.post('/staff/:userId/resend-invitation', hospitalAdminController.resendIn
 router.get('/admins', hospitalAdminController.getHospitalAdmins);
 router.post('/admins/:userId/promote', hospitalAdminController.promoteToAdmin);
 router.post('/admins/:userId/revoke', hospitalAdminController.revokeAdminAccess);
-
-// Invitation acceptance (public route - no auth required for token-based invite)
-router.post('/invitations/:token/accept', hospitalAdminController.acceptInvitation);
 
 module.exports = router;

@@ -4,9 +4,38 @@ const socketService = require('../socket');
 const Patient = require('../models/Patient');
 const User = require('../models/User');
 
+const APPOINTMENT_FIELDS = ['patientId', 'doctorId', 'appointmentDate', 'reason', 'isUrgent', 'status'];
+
+const pick = (body = {}, fields) => {
+    const out = {};
+    for (const key of fields) {
+        if (body[key] !== undefined) out[key] = body[key];
+    }
+    if (typeof out.status === 'string') out.status = out.status.toLowerCase();
+    return out;
+};
+
+const ownPatientRecord = (req) =>
+    Patient.findOne({ userId: req.user.userId, ...(req.tenantFilter || {}) });
+
+// Ensure referenced doctor/patient belong to the caller's hospital
+const validateReferences = async (req, data) => {
+    const hospitalId = req.tenantFilter?.hospitalId;
+    if (!hospitalId) return null;
+    if (data.doctorId !== undefined) {
+        const doctor = await User.findOne({ _id: data.doctorId, role: 'doctor', hospitalId }).select('_id');
+        if (!doctor) return 'Doctor not found in this hospital';
+    }
+    if (data.patientId !== undefined) {
+        const patient = await Patient.findOne({ _id: data.patientId, hospitalId }).select('_id');
+        if (!patient) return 'Patient not found in this hospital';
+    }
+    return null;
+};
+
 exports.createAppointment = async (req, res) => {
     try {
-        const appointmentData = { ...req.body };
+        const appointmentData = pick(req.body, APPOINTMENT_FIELDS);
         
         if (req.tenantFilter && req.tenantFilter.hospitalId) {
             appointmentData.hospitalId = req.tenantFilter.hospitalId;
@@ -14,12 +43,20 @@ exports.createAppointment = async (req, res) => {
 
         // If patient is creating their own appointment, force patientId
         if (req.user && req.user.role === 'patient') {
-            const patientRecord = await Patient.findOne({ userId: req.user.userId });
+            const patientRecord = await ownPatientRecord(req);
             if (!patientRecord) {
                 return res.status(404).json({ message: 'Patient profile not found' });
             }
             appointmentData.patientId = patientRecord._id;
             appointmentData.status = 'scheduled'; // Default for patient-booked
+        } else if (req.user && req.user.role === 'doctor') {
+            // Doctors book appointments for themselves
+            appointmentData.doctorId = req.user.userId;
+        }
+
+        const referenceError = await validateReferences(req, appointmentData);
+        if (referenceError) {
+            return res.status(400).json({ success: false, message: referenceError });
         }
 
         const appointment = new Appointment(appointmentData);
@@ -65,7 +102,7 @@ exports.getAppointments = async (req, res) => {
         
         // Filter by patient ID if requester is a patient
         if (req.user && req.user.role === 'patient') {
-            const patientRecord = await Patient.findOne({ userId: req.user.userId });
+            const patientRecord = await ownPatientRecord(req);
             if (!patientRecord) {
                 return res.json({ success: true, data: [] }); // No profile = no appointments
             }
@@ -96,17 +133,32 @@ exports.updateAppointment = async (req, res) => {
             query.hospitalId = req.tenantFilter.hospitalId;
         }
 
-        // If patient, they can only update their own
+        let updates;
+
+        // If patient, they can only cancel their own
         if (req.user && req.user.role === 'patient') {
-            const patientRecord = await Patient.findOne({ userId: req.user.userId });
-            if (patientRecord) {
-                query.patientId = patientRecord._id;
+            const patientRecord = await ownPatientRecord(req);
+            if (!patientRecord) {
+                return res.status(404).json({ success: false, message: 'Appointment not found' });
+            }
+            query.patientId = patientRecord._id;
+            updates = pick(req.body, ['status']);
+            if (updates.status !== 'cancelled') {
+                return res.status(403).json({ success: false, message: 'Patients can only cancel appointments' });
             }
         } else if (req.user && req.user.role === 'doctor') {
             query.doctorId = req.user.userId;
+            updates = pick(req.body, ['appointmentDate', 'reason', 'isUrgent', 'status']);
+        } else {
+            updates = pick(req.body, ['doctorId', 'appointmentDate', 'reason', 'isUrgent', 'status']);
         }
 
-        const appointment = await Appointment.findOneAndUpdate(query, req.body, { new: true });
+        const referenceError = await validateReferences(req, updates);
+        if (referenceError) {
+            return res.status(400).json({ success: false, message: referenceError });
+        }
+
+        const appointment = await Appointment.findOneAndUpdate(query, updates, { new: true, runValidators: true });
         if (!appointment) return res.status(404).json({ success: false, message: 'Appointment not found' });
         
         res.json({ success: true, data: appointment });

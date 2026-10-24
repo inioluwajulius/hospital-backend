@@ -3,9 +3,19 @@ const Patient = require('../models/Patient');
 
 exports.createMedicalRecord = async (req, res) => {
     try {
-        const recordData = { ...req.body };
+        const recordData = {};
+        for (const key of ['patientId', 'appointmentId', 'vitals', 'symptoms', 'diagnosis', 'treatment', 'notes']) {
+            if (req.body[key] !== undefined) recordData[key] = req.body[key];
+        }
+        if (!recordData.patientId) {
+            return res.status(400).json({ success: false, error: 'patientId is required' });
+        }
         if (req.tenantFilter && req.tenantFilter.hospitalId) {
             recordData.hospitalId = req.tenantFilter.hospitalId;
+            const patient = await Patient.findOne({ _id: recordData.patientId, hospitalId: recordData.hospitalId }).select('_id');
+            if (!patient) {
+                return res.status(400).json({ success: false, error: 'Patient not found in this hospital' });
+            }
         }
         
         // Force doctorId if requester is a doctor
@@ -51,7 +61,7 @@ exports.getAllRecords = async (req, res) => {
         }
         
         if (req.user && req.user.role === 'patient') {
-            const patientRecord = await Patient.findOne({ userId: req.user.userId });
+            const patientRecord = await Patient.findOne({ userId: req.user.userId, ...(req.tenantFilter || {}) });
             if (!patientRecord) return res.json({ success: true, data: [] });
             query.patientId = patientRecord._id;
         } else if (req.user && req.user.role === 'doctor') {

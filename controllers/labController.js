@@ -171,12 +171,25 @@ exports.deleteLabResult = async (req, res) => {
 
 exports.orderLabTest = async (req, res) => {
     try {
-        const labTestData = { ...req.body };
+        const { patientId, testName, category, priority, doctorId } = req.body;
+        const labTestData = { patientId, testName, category, priority };
+
+        if (!patientId || !testName) {
+            return res.status(400).json({ success: false, error: 'patientId and testName are required' });
+        }
+
+        // Doctors order for themselves; admins must name the ordering doctor
+        labTestData.doctorId = req.user && req.user.role === 'doctor' ? req.user.userId : doctorId;
+        if (!labTestData.doctorId) {
+            return res.status(400).json({ success: false, error: 'doctorId is required' });
+        }
+
         if (req.tenantFilter && req.tenantFilter.hospitalId) {
             labTestData.hospitalId = req.tenantFilter.hospitalId;
-        }
-        if (req.user && req.user.role === 'doctor') {
-            labTestData.doctorId = req.user.userId;
+            const patient = await Patient.findOne({ _id: patientId, hospitalId: labTestData.hospitalId }).select('_id');
+            if (!patient) {
+                return res.status(400).json({ success: false, error: 'Patient not found in this hospital' });
+            }
         }
 
         const labTest = new LabTest(labTestData);
@@ -216,14 +229,22 @@ exports.getLabTests = async (req, res) => {
 exports.updateLabTest = async (req, res) => {
     try {
         const { id } = req.params;
-        const { testName, testCategory, description, result } = req.body;
+        const { testName, category, priority, status, result } = req.body;
 
         let query = { _id: id };
         if (req.tenantFilter && req.tenantFilter.hospitalId) {
             query.hospitalId = req.tenantFilter.hospitalId;
         }
 
-        const labTest = await LabTest.findOneAndUpdate(query, { testName, testCategory, description, result }, { new: true });
+        const updates = {};
+        for (const [key, value] of Object.entries({ testName, category, priority, status, result })) {
+            if (value !== undefined) updates[key] = value;
+        }
+        if (req.user.role === 'lab_technician') {
+            updates.labTechnicianId = req.user.userId;
+        }
+
+        const labTest = await LabTest.findOneAndUpdate(query, updates, { new: true, runValidators: true });
         if (!labTest) return res.status(404).json({ success: false, message: 'LabTest not found' });
         
         res.json({ success: true, data: labTest });

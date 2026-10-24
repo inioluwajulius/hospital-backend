@@ -4,6 +4,21 @@ const HospitalAdmin = require('../models/HospitalAdmin');
 const crypto = require('crypto');
 const sendEmail = require('../utils/email');
 
+// Roles a hospital admin may invite. Admin rights are granted via promoteToAdmin;
+// super_admin can never be granted from here.
+const INVITABLE_ROLES = ['doctor', 'nurse', 'receptionist', 'lab_technician', 'pharmacist', 'radiologist', 'accountant'];
+
+const sendInvitationEmail = ({ email, name, role, invitationToken }) => {
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const invitationLink = `${frontendUrl}/auth/accept-invite/${invitationToken}`;
+    const message = `Hello ${name},\n\nYou have been invited to join the hospital portal as a ${role.toUpperCase()}.\n\nPlease click the following link to accept your invitation and set your password:\n${invitationLink}\n\nThis link will expire in 7 days.`;
+    return sendEmail({
+        email,
+        subject: 'Hospital Portal Invitation',
+        message
+    });
+};
+
 /**
  * Hospital Admin Controller
  * Handles hospital-level operations like inviting staff, managing users
@@ -135,6 +150,12 @@ exports.inviteStaffMember = async (req, res) => {
             });
         }
 
+        if (!INVITABLE_ROLES.includes(String(role).toLowerCase())) {
+            return res.status(400).json({
+                error: `Invalid role. Must be one of: ${INVITABLE_ROLES.join(', ')}`,
+            });
+        }
+
         // Check if user already exists in hospital
         const existingUser = await User.findOne({ email, hospitalId });
         if (existingUser) {
@@ -155,7 +176,7 @@ exports.inviteStaffMember = async (req, res) => {
             name,
             email,
             password: hashedTempPassword,
-            role,
+            role: String(role).toLowerCase(),
             hospitalId,
             status: 'pending',
             department,
@@ -165,16 +186,14 @@ exports.inviteStaffMember = async (req, res) => {
             invitationEmail: email,
         });
 
-        // Send invitation email with link to set password
-        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-        const invitationLink = `${frontendUrl}/auth/accept-invite/${invitationToken}`;
-        const message = `Hello ${name},\n\nYou have been invited to join the hospital portal as a ${role.toUpperCase()}.\n\nPlease click the following link to accept your invitation and set your password:\n${invitationLink}\n\nThis link will expire in 7 days.`;
-        
-        await sendEmail({
-            email: email,
-            subject: 'Hospital Portal Invitation',
-            message: message
-        });
+        // Send invitation email with link to set password. If it fails, remove the
+        // pending user so the admin can retry the invitation.
+        try {
+            await sendInvitationEmail({ email, name, role: newUser.role, invitationToken });
+        } catch (emailError) {
+            await User.deleteOne({ _id: newUser._id });
+            return res.status(502).json({ error: 'Could not send the invitation email. Please try again.' });
+        }
 
         res.status(201).json({
             success: true,
@@ -264,6 +283,12 @@ exports.resendInvitation = async (req, res) => {
 
         await user.save();
 
+        try {
+            await sendInvitationEmail({ email: user.email, name: user.name, role: user.role, invitationToken });
+        } catch (emailError) {
+            return res.status(502).json({ error: 'Could not send the invitation email. Please try again.' });
+        }
+
         res.json({
             success: true,
             message: 'Invitation resent',
@@ -313,6 +338,10 @@ exports.promoteToAdmin = async (req, res) => {
             return res.status(404).json({ error: 'User not found' });
         }
 
+        if (user.role === 'patient' || user.isSuperAdmin || user.status !== 'active') {
+            return res.status(400).json({ error: 'Only active staff members can be promoted to admin' });
+        }
+
         // Create HospitalAdmin record
         const hospitalAdmin = await HospitalAdmin.findOneAndUpdate(
             { userId, hospitalId },
@@ -353,13 +382,23 @@ exports.revokeAdminAccess = async (req, res) => {
             return res.status(400).json({ error: 'Hospital context required' });
         }
 
+        if (String(userId) === String(req.user._id)) {
+            return res.status(400).json({ error: 'You cannot revoke your own admin access' });
+        }
+
+        // Only hospital admins of this hospital can be demoted
+        const user = await User.findOneAndUpdate(
+            { _id: userId, hospitalId, role: 'hospital_admin', isSuperAdmin: { $ne: true } },
+            { role: 'doctor' }, // Or appropriate role
+        );
+        if (!user) {
+            return res.status(404).json({ error: 'Hospital admin not found' });
+        }
+
         await HospitalAdmin.findOneAndUpdate(
             { userId, hospitalId },
             { status: 'inactive' }
         );
-
-        // Update user role
-        await User.findByIdAndUpdate(userId, { role: 'doctor' }); // Or appropriate role
 
         res.json({
             success: true,

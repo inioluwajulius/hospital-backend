@@ -10,10 +10,10 @@ const {
 	payInvoice
 } = require('../../../controllers/billingController');
 
-router.post("/", authMiddleware, authorize("accountant"), createInvoice);
+router.post("/", authMiddleware, authorize("admin", "accountant"), createInvoice);
 
 router.get("/", authMiddleware, getInvoices);
 
-router.put("/:id/pay", authMiddleware, authorize("accountant"), payInvoice);
+router.put("/:id/pay", authMiddleware, authorize("admin", "accountant"), payInvoice);
 
 module.exports = router;

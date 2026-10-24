@@ -4,7 +4,7 @@ const router = express.Router();
 const authMiddleware = require('../../../middleware/authMiddleware');
 const authorize = require('../../../middleware/roleMiddleware');
 
-const { createPatient, getPatients, updatePatient, deletePatient, searchPatients, updatePatientProfile } = require('../../../controllers/patientController');
+const { createPatient, getPatients, getPatientById, updatePatient, deletePatient, searchPatients, updatePatientProfile } = require('../../../controllers/patientController');
 
 /**
  * @route   GET /api/v1/patients
@@ -21,6 +21,13 @@ router.get('/', authMiddleware, getPatients);
 router.get('/search/existing', searchPatients);
 
 
+
+/**
+ * @route   GET /api/v1/patients/:id
+ * @desc    Get one patient (patients may only read their own record)
+ * @access  Private
+ */
+router.get('/:id', authMiddleware, getPatientById);
 
 /**
  * @route   POST /api/v1/patients

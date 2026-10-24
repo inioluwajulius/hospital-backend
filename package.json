@@ -7,6 +7,7 @@
   "type": "commonjs",
   "main": "server.js",
   "scripts": {
+    "start": "node server.js",
     "dev": "nodemon server.js",
     "lint": "eslint . --ext .js",
     "test": "jest --runInBand",
@@ -28,5 +29,13 @@
     "jest": "^30.3.0",
     "nodemon": "^3.1.14",
     "supertest": "^7.2.2"
+  },
+  "jest": {
+    "testMatch": [
+      "<rootDir>/tests/**/*.test.js"
+    ]
+  },
+  "engines": {
+    "node": ">=20.19.0"
   }
 }

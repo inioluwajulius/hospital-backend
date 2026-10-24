@@ -4,11 +4,14 @@ const authMiddleware = require('../../../middleware/authMiddleware');
 
 const router = express.Router();
 
+// Audit logs are not scoped per hospital, so only platform super admins may read them
+const isPlatformAdmin = (req) => req.user.isSuperAdmin === true || req.user.role === 'super_admin';
+
 // Get all audit logs (Admin only)
 router.get('/', authMiddleware, async (req, res) => {
     try {
         // Check if user is admin
-        if (req.user.role !== 'admin') {
+        if (!isPlatformAdmin(req)) {
             return res.status(403).json({ message: 'Access denied. Admin only.' });
         }
 
@@ -39,7 +42,7 @@ router.get('/', authMiddleware, async (req, res) => {
 // Get audit log by ID
 router.get('/:id', authMiddleware, async (req, res) => {
     try {
-        if (req.user.role !== 'admin') {
+        if (!isPlatformAdmin(req)) {
             return res.status(403).json({ message: 'Access denied. Admin only.' });
         }
 
@@ -55,12 +58,13 @@ router.get('/:id', authMiddleware, async (req, res) => {
 });
 
 // Create audit log (typically called internally by other endpoints)
-router.post('/', async (req, res) => {
+router.post('/', authMiddleware, async (req, res) => {
     try {
+        // Identity always comes from the token, never from the body
+        const userId = req.user.userId;
+        const userRole = req.user.role;
         const {
-            userId,
             userName,
-            userRole,
             action,
             module,
             severity = 'Info',
@@ -95,7 +99,7 @@ router.post('/', async (req, res) => {
 // Get audit logs by user
 router.get('/user/:userId', authMiddleware, async (req, res) => {
     try {
-        if (req.user.role !== 'admin' && req.user._id.toString() !== req.params.userId) {
+        if (!isPlatformAdmin(req) && req.user._id.toString() !== req.params.userId) {
             return res.status(403).json({ message: 'Access denied.' });
         }
 
@@ -112,7 +116,7 @@ router.get('/user/:userId', authMiddleware, async (req, res) => {
 // Get audit logs by module
 router.get('/module/:module', authMiddleware, async (req, res) => {
     try {
-        if (req.user.role !== 'admin') {
+        if (!isPlatformAdmin(req)) {
             return res.status(403).json({ message: 'Access denied. Admin only.' });
         }
 
@@ -129,7 +133,7 @@ router.get('/module/:module', authMiddleware, async (req, res) => {
 // Export audit logs (CSV format)
 router.get('/export/csv', authMiddleware, async (req, res) => {
     try {
-        if (req.user.role !== 'admin') {
+        if (!isPlatformAdmin(req)) {
             return res.status(403).json({ message: 'Access denied. Admin only.' });
         }
 

@@ -3,7 +3,8 @@ const dns = require('dns');
 dns.setServers(['8.8.8.8', '1.1.1.1']);
 const Hospital = require('./models/Hospital');
 
-const MONGO_URI = "mongodb+srv://inijulius37_db_user:LhZOPafkWTkFSGeC@hospital-management-dat.ltx477f.mongodb.net/?retryWrites=true&w=majority";
+require("dotenv").config({ path: require("path").join(__dirname, ".env") });
+const MONGO_URI = process.env.MONGO_URI;
 
 async function test() {
   try {

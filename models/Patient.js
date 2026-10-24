@@ -1,11 +1,17 @@
 const mongoose = require('mongoose');
 
 const patientSchema = new mongoose.Schema({
+    // Set once the patient has an account. Walk-in records created by staff have
+    // no user until the patient registers and links the record.
     userId: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'User',
-        required: true
+        ref: 'User'
     },
+
+    // Contact details for walk-in records without an account (otherwise taken from userId)
+    name: String,
+
+    email: String,
 
     hospitalId: {
         type: mongoose.Schema.Types.ObjectId,
@@ -40,6 +46,12 @@ const patientSchema = new mongoose.Schema({
     phone: String,
 
     address: String,
+
+    emergencyContact: {
+        name: String,
+        relationship: String,
+        phone: String
+    },
 
     bloodGroup: String,
 

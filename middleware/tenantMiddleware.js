@@ -1,106 +1,100 @@
 const mongoose = require('mongoose');
+const jwt = require('jsonwebtoken');
 const Hospital = require('../models/Hospital');
-const User = require('../models/User');
+
+// Matches no document. Used so that an authenticated user without a hospital
+// gets an empty result instead of an unfiltered query.
+const NO_TENANT = new mongoose.Types.ObjectId('000000000000000000000000');
+
+/**
+ * Decode the Bearer token if present and valid. Invalid tokens are ignored here;
+ * authMiddleware rejects them on protected routes.
+ */
+const decodeToken = (req) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ') || !process.env.JWT_SECRET) {
+        return null;
+    }
+    try {
+        return jwt.verify(authHeader.split(' ')[1], process.env.JWT_SECRET);
+    } catch {
+        return null;
+    }
+};
+
+/**
+ * Hospital id requested by the client via header or query. Only honoured for
+ * anonymous requests (registration, branding) and super admins.
+ */
+const getRequestedHospitalId = (req) => {
+    const id = req.headers['x-hospital-id'] || req.headers['x-tenant-id'] || req.query?.hospitalId;
+    return typeof id === 'string' && mongoose.isValidObjectId(id) ? id : null;
+};
 
 /**
  * Tenant Context Middleware
- * Extracts hospital/tenant information from request and sets it on req.tenant
- * Supports multiple identification methods:
- * 1. Subdomain: hospitalname.yourdomain.com
- * 2. Custom Domain: hospital.com
- * 3. Header: x-hospital-id or x-tenant-id
- * 4. Query Parameter: ?hospitalId=xxx
- * 5. User's JWT token contains hospitalId
+ * Sets req.userContext (from the JWT) and req.tenant (the hospital in scope).
+ *
+ * For authenticated non-super-admin users the hospital always comes from their
+ * signed token; client-supplied headers/query params cannot change it.
+ * Anonymous requests and super admins may select a hospital via
+ * x-hospital-id / x-tenant-id header, ?hospitalId, subdomain or custom domain.
  */
-
 const tenantMiddleware = async (req, res, next) => {
-    try {
-        let hospital = null;
-        let identifiedBy = null;
+    const decoded = decodeToken(req);
 
-        const isDbConnected = mongoose.connection && mongoose.connection.readyState === 1;
+    if (decoded) {
+        req.userContext = {
+            id: decoded.userId,
+            isSuperAdmin: !!decoded.isSuperAdmin,
+            hospitalId: decoded.hospitalId || null,
+            role: decoded.role,
+        };
+    }
 
-        if (isDbConnected) {
-            // Method 1: Extract from host header (subdomain or custom domain)
-            const host = req.get('host')?.split(':')[0] || ''; // Remove port if exists
-            
-            // Check if it's a subdomain
-            const subdomainMatch = host.match(/^([a-z0-9-]+)\.yourhospitalapp\.com$/i);
-            if (subdomainMatch) {
-                const subdomain = subdomainMatch[1];
-                hospital = await Hospital.findOne({ subdomain });
-                identifiedBy = 'subdomain';
-            }
+    let hospitalId = null;
+    let identifiedBy = null;
 
-            // Method 2: Check for custom domain
-            if (!hospital && host !== 'localhost' && host !== '127.0.0.1') {
-                hospital = await Hospital.findOne({ customDomain: host });
-                identifiedBy = 'customDomain';
-            }
+    if (decoded && !decoded.isSuperAdmin) {
+        hospitalId = decoded.hospitalId || null;
+        identifiedBy = 'userHospital';
+    } else {
+        hospitalId = getRequestedHospitalId(req);
+        identifiedBy = hospitalId ? 'header' : null;
+    }
 
-            // Method 3: Check x-hospital-id header
-            if (!hospital && req.headers['x-hospital-id']) {
-                hospital = await Hospital.findById(req.headers['x-hospital-id']);
-                identifiedBy = 'header';
-            }
+    let hospital = null;
+    const isDbConnected = mongoose.connection && mongoose.connection.readyState === 1;
 
-            // Method 4: Check x-tenant-id header
-            if (!hospital && req.headers['x-tenant-id']) {
-                hospital = await Hospital.findById(req.headers['x-tenant-id']);
-                identifiedBy = 'header';
-            }
-
-            // Method 5: Check query parameter
-            if (!hospital && req.query.hospitalId) {
-                hospital = await Hospital.findById(req.query.hospitalId);
-                identifiedBy = 'query';
-            }
-
-            // Method 6: Extract from JWT token
-            if (!hospital && req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
-                const token = req.headers.authorization.split(' ')[1];
-                try {
-                    const jwt = require('jsonwebtoken');
-                    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-                    if (decoded.hospitalId) {
-                        hospital = await Hospital.findById(decoded.hospitalId);
-                        identifiedBy = 'userHospital';
-                    } else if (decoded.isSuperAdmin) {
-                        hospital = null;
-                        identifiedBy = 'superAdmin';
-                    }
-                } catch (e) {
-                    // Ignore token errors here, let authMiddleware handle them
+    if (isDbConnected) {
+        try {
+            if (hospitalId) {
+                hospital = await Hospital.findById(hospitalId);
+            } else if (!decoded) {
+                const host = req.get('host')?.split(':')[0] || '';
+                const subdomainMatch = host.match(/^([a-z0-9-]+)\.yourhospitalapp\.com$/i);
+                if (subdomainMatch) {
+                    hospital = await Hospital.findOne({ subdomain: subdomainMatch[1] });
+                    identifiedBy = 'subdomain';
+                } else if (host !== 'localhost' && host !== '127.0.0.1') {
+                    hospital = await Hospital.findOne({ customDomain: host });
+                    identifiedBy = 'customDomain';
                 }
             }
+        } catch (error) {
+            console.error('Tenant middleware error:', error);
         }
-
-        // Store tenant context in request
-        req.tenant = {
-            hospital,
-            id: hospital?._id,
-            slug: hospital?.slug,
-            identifiedBy,
-            isMultiTenant: true,
-        };
-
-        // Store user context
-        if (req.user) {
-            req.userContext = {
-                id: req.user._id,
-                isSuperAdmin: req.user.isSuperAdmin,
-                hospitalId: req.user.hospitalId,
-                role: req.user.role,
-            };
-        }
-
-        next();
-    } catch (error) {
-        console.error('Tenant middleware error:', error);
-        // Don't fail the request, just set empty tenant
-        req.tenant = { hospital: null, isMultiTenant: true };
-        next();
     }
+
+    req.tenant = {
+        hospital,
+        id: hospital?._id || hospitalId || undefined,
+        slug: hospital?.slug,
+        identifiedBy,
+        isMultiTenant: true,
+    };
+
+    next();
 };
 
 /**
@@ -109,7 +103,7 @@ const tenantMiddleware = async (req, res, next) => {
  * Fails if no hospital context is found
  */
 const requireTenant = (req, res, next) => {
-    if (!req.tenant?.hospital && !req.userContext?.isSuperAdmin) {
+    if (!req.tenant?.id && !req.userContext?.isSuperAdmin) {
         return res.status(400).json({
             error: 'Hospital context required',
             message: 'Please provide hospital identification (subdomain, custom domain, or header)',
@@ -120,25 +114,26 @@ const requireTenant = (req, res, next) => {
 
 /**
  * Tenant Data Filter Middleware
- * Automatically filters database queries to include tenantId
- * Applied to all operations within a hospital context
+ * Sets req.tenantFilter, which controllers merge into their queries.
+ * Authenticated non-super-admins are always scoped to their own hospital.
  */
 const tenantDataFilter = (req, res, next) => {
-    if (req.tenant?.hospital && !req.userContext?.isSuperAdmin) {
-        // Store tenant ID for use in database queries
-        req.tenantFilter = {
-            hospitalId: req.tenant.hospital._id,
-        };
-    } else if (req.userContext?.isSuperAdmin) {
-        // SuperAdmin can query across all tenants
-        req.tenantFilter = null;
+    const ctx = req.userContext;
+
+    if (ctx?.isSuperAdmin) {
+        // SuperAdmin queries across all tenants unless a hospital was selected
+        req.tenantFilter = req.tenant?.id ? { hospitalId: req.tenant.id } : null;
+    } else if (ctx) {
+        req.tenantFilter = { hospitalId: ctx.hospitalId || NO_TENANT };
+    } else if (req.tenant?.id) {
+        req.tenantFilter = { hospitalId: req.tenant.id };
     }
     next();
 };
 
 /**
  * Tenant Authorization Middleware
- * Ensures user belongs to the identified hospital
+ * Ensures user belongs to the identified hospital and that it is active.
  * Except for SuperAdmin users
  */
 const authorizeTenant = (req, res, next) => {
@@ -147,14 +142,25 @@ const authorizeTenant = (req, res, next) => {
         return next();
     }
 
-    // Regular users must have hospitalId that matches tenant
-    if (req.userContext?.hospitalId && req.tenant?.hospital) {
-        if (req.userContext.hospitalId.toString() !== req.tenant.hospital._id.toString()) {
-            return res.status(403).json({
-                error: 'Unauthorized',
-                message: 'You do not have access to this hospital',
-            });
-        }
+    if (!req.userContext?.hospitalId) {
+        return res.status(403).json({
+            error: 'Unauthorized',
+            message: 'You do not have access to this hospital',
+        });
+    }
+
+    if (req.tenant?.id && req.userContext.hospitalId.toString() !== req.tenant.id.toString()) {
+        return res.status(403).json({
+            error: 'Unauthorized',
+            message: 'You do not have access to this hospital',
+        });
+    }
+
+    if (req.tenant?.hospital && req.tenant.hospital.status !== 'active') {
+        return res.status(403).json({
+            error: 'Hospital inactive',
+            message: 'This hospital account is not active',
+        });
     }
 
     next();

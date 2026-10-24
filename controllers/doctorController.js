@@ -1,4 +1,11 @@
 const User = require('../models/User');
+const bcrypt = require('bcryptjs');
+
+const STRONG_PASSWORD = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/;
+
+// Fields an admin may change on a doctor account. Anything else in the body
+// (role, hospitalId, isSuperAdmin, password, ...) is ignored.
+const UPDATABLE_DOCTOR_FIELDS = ['name', 'phone', 'specialization', 'department', 'licenseNumber', 'yearsOfExperience', 'status'];
 
 exports.createDoctor = async (req, res) => {
     try {
@@ -8,8 +15,12 @@ exports.createDoctor = async (req, res) => {
             return res.status(403).json({ message: 'Hospital context required' });
         }
 
-        // Check if user already exists
-        const existingUser = await User.findOne({ email });
+        if (!password || !STRONG_PASSWORD.test(password)) {
+            return res.status(400).json({ message: 'Password must be at least 8 characters and include uppercase, lowercase, number, and special character' });
+        }
+
+        // Check if user already exists in this hospital
+        const existingUser = await User.findOne({ email, hospitalId: req.tenantFilter.hospitalId });
         if (existingUser) {
             return res.status(400).json({ message: 'User with this email already exists' });
         }
@@ -18,7 +29,7 @@ exports.createDoctor = async (req, res) => {
             name,
             email,
             phone,
-            password: password || 'WelcomeDoctor@123', // Default password if none provided
+            password: await bcrypt.hash(password, 10),
             role: 'doctor',
             userType: 'staff',
             status: 'active', // Admin creates them directly as active
@@ -79,7 +90,12 @@ exports.updateDoctor = async (req, res) => {
             query.hospitalId = req.tenantFilter.hospitalId;
         }
 
-        const doctor = await User.findOneAndUpdate(query, req.body, { new: true }).select('-password');
+        const updates = {};
+        for (const field of UPDATABLE_DOCTOR_FIELDS) {
+            if (req.body[field] !== undefined) updates[field] = req.body[field];
+        }
+
+        const doctor = await User.findOneAndUpdate(query, updates, { new: true, runValidators: true }).select('-password');
         
         if (!doctor) {
             return res.status(404).json({ message: 'Doctor not found in this hospital' });

@@ -10,7 +10,7 @@ const { createAppointment, getAppointments, updateAppointment, deleteAppointment
 router.get('/', authMiddleware, getAppointments);
 
 // POST - Create appointment (admin, receptionist, patient)
-router.post('/', authMiddleware, authorize('admin', 'receptionist', 'patient'), createAppointment);
+router.post('/', authMiddleware, authorize('admin', 'receptionist', 'patient', 'doctor'), createAppointment);
 
 // PUT - Update/reschedule/cancel appointment
 router.put('/:id', authMiddleware, authorize('admin', 'receptionist', 'patient', 'doctor'), updateAppointment);
