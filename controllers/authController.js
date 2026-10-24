@@ -109,12 +109,12 @@ const startEmailVerification = async (user) => {
 };
 
 const CODE_ERROR_MESSAGES = {
-    invalid: 'That code is incorrect. Check the code and try again, or request a new one.',
+    invalid: "That code is incorrect. Use the code from the most recent email (a new code replaces older ones), or request a new one.",
     expired: 'This code has expired. Please request a new one.',
     too_many_attempts: 'Too many incorrect attempts. Please request a new code.',
 };
 // Password reset uses one message for every failure so it doesn't reveal whether an account exists
-const RESET_CODE_ERROR = 'The code is incorrect or has expired. Check the code or request a new one.';
+const RESET_CODE_ERROR = 'The code is incorrect or has expired. Use the code from the most recent email, or request a new one.';
 const GENERIC_RESEND_MESSAGE = 'If this email needs verification, a new code has been sent.';
 const GENERIC_RESET_REQUEST_MESSAGE = "If an account exists with this email, we've sent a 6-digit password reset code.";
 
