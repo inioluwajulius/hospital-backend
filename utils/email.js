@@ -33,29 +33,42 @@ const getFromAddress = () => {
     return process.env.EMAIL_FROM || 'MediCare <noreply@medicare.com>';
 };
 
-// One pooled transporter per configuration, reused across sends
-let cachedTransport = null;
-let cachedKey = null;
+// Brevo accepts 587 and 2525 (STARTTLS) and 465 (TLS). Some networks block a port,
+// so on a connection failure the other ports are tried and the working one is kept.
+const BREVO_PORTS = [587, 2525, 465];
+const CONNECTION_ERRORS = ['ETIMEDOUT', 'ECONNREFUSED', 'ECONNRESET', 'ESOCKET', 'EHOSTUNREACH', 'ENETUNREACH', 'ECONNECTION'];
+const isConnectionError = (error) => CONNECTION_ERRORS.includes(error.code) || error.command === 'CONN';
 
-const getTransport = () => {
-    const { host, port, user, pass } = getConfig();
+// One pooled transporter per host/port/user, reused across sends
+const transports = new Map();
+let workingPort = null;
+
+const getTransport = (port) => {
+    const { host, user, pass } = getConfig();
     const key = `${host}:${port}:${user}`;
-    if (cachedTransport && cachedKey === key) return cachedTransport;
+    if (!transports.has(key)) {
+        transports.set(key, nodemailer.createTransport({
+            host,
+            port,
+            secure: port === 465, // 465 = implicit TLS; 587/2525 upgrade with STARTTLS
+            requireTLS: port !== 465 && process.env.NODE_ENV === 'production',
+            auth: user ? { user, pass } : undefined,
+            pool: true,
+            maxConnections: 3,
+            connectionTimeout: 10000,
+            greetingTimeout: 10000,
+            socketTimeout: 20000,
+        }));
+    }
+    return transports.get(key);
+};
 
-    cachedTransport = nodemailer.createTransport({
-        host,
-        port,
-        secure: port === 465, // 465 = implicit TLS; 587/2525 upgrade with STARTTLS
-        requireTLS: port !== 465 && process.env.NODE_ENV === 'production',
-        auth: user ? { user, pass } : undefined,
-        pool: true,
-        maxConnections: 3,
-        connectionTimeout: 10000,
-        greetingTimeout: 10000,
-        socketTimeout: 20000,
-    });
-    cachedKey = key;
-    return cachedTransport;
+// Configured port first, then (for Brevo) the alternatives
+const portsToTry = () => {
+    const { host, port } = getConfig();
+    const ports = [workingPort, port];
+    if (/brevo\.com$/i.test(host || '')) ports.push(...BREVO_PORTS);
+    return [...new Set(ports.filter(Boolean))];
 };
 
 const maskEmail = (email) => String(email || '').replace(/^(.).*(@.*)$/, '$1***$2');
@@ -76,23 +89,39 @@ const sendEmail = async (options) => {
         return { sent: false };
     }
 
-    try {
-        const info = await getTransport().sendMail({
-            from: getFromAddress(),
-            to: options.email,
-            subject: options.subject,
-            text: options.message,
-            html: options.html,
-        });
-        console.log(`✉️ Email sent to ${maskEmail(options.email)}: "${options.subject}"`);
-        return { sent: true, messageId: info.messageId };
-    } catch (error) {
-        // Log only diagnostic fields; never credentials or message content
-        console.error(`❌ Email to ${maskEmail(options.email)} failed: ${error.code || 'ERROR'} ${error.responseCode || ''} ${error.command || ''}`.trim());
-        const safeError = new Error('Email delivery failed');
-        safeError.code = 'EMAIL_DELIVERY_FAILED';
-        throw safeError;
+    const mail = {
+        from: getFromAddress(),
+        to: options.email,
+        subject: options.subject,
+        text: options.message,
+        html: options.html,
+    };
+
+    let lastError;
+    for (const port of portsToTry()) {
+        try {
+            const info = await getTransport(port).sendMail(mail);
+            if (workingPort !== port && workingPort !== null) {
+                console.warn(`⚠️ SMTP port ${workingPort} stopped working; now using ${port}`);
+            } else if (port !== getConfig().port) {
+                console.warn(`⚠️ SMTP port ${getConfig().port} is unreachable from this network; using ${port}. Set BREVO_SMTP_PORT=${port} to skip the retry.`);
+            }
+            workingPort = port;
+            console.log(`✉️ Email sent to ${maskEmail(options.email)}: "${options.subject}"`);
+            return { sent: true, messageId: info.messageId };
+        } catch (error) {
+            lastError = error;
+            // Log only diagnostic fields; never credentials or message content
+            console.error(`❌ Email to ${maskEmail(options.email)} via port ${port} failed: ${error.code || 'ERROR'} ${error.responseCode || ''} ${error.command || ''}`.trim());
+            // Only connection problems are worth retrying on another port
+            if (!isConnectionError(error)) break;
+        }
     }
+
+    const safeError = new Error('Email delivery failed');
+    safeError.code = 'EMAIL_DELIVERY_FAILED';
+    safeError.cause = lastError?.code;
+    throw safeError;
 };
 
 module.exports = sendEmail;
